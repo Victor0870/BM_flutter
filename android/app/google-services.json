@@ -1,0 +1,113 @@
+{
+  "project_info": {
+    "project_number": "924296680961",
+    "project_id": "bizmate-1e317",
+    "storage_bucket": "bizmate-1e317.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:924296680961:android:65eeb0a67817c6827c5200",
+        "android_client_info": {
+          "package_name": "com.Victory.Bizmate"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "924296680961-n39smgp6qh2fgsfngdcfafjhco1jed9u.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.Victory.Bizmate",
+            "certificate_hash": "a1c26170ae6c10d5a347b9e5e0cd5040cb60dfd1"
+          }
+        },
+        {
+          "client_id": "924296680961-njncmae0sd1cc92oq5llmd56u7emusti.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFNwRPNCkk5xA7v2c41_RB2Rg33o55DTw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "924296680961-njncmae0sd1cc92oq5llmd56u7emusti.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:924296680961:android:638a25bda26ca01b7c5200",
+        "android_client_info": {
+          "package_name": "com.VictoryGame.Bitmate"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "924296680961-tjmrnltlakrb216nk80jdej0v7cqph0b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.VictoryGame.Bitmate",
+            "certificate_hash": "a1c26170ae6c10d5a347b9e5e0cd5040cb60dfd1"
+          }
+        },
+        {
+          "client_id": "924296680961-njncmae0sd1cc92oq5llmd56u7emusti.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFNwRPNCkk5xA7v2c41_RB2Rg33o55DTw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "924296680961-njncmae0sd1cc92oq5llmd56u7emusti.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:924296680961:android:3f36006871a542337c5200",
+        "android_client_info": {
+          "package_name": "com.example.bizmate_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "924296680961-njncmae0sd1cc92oq5llmd56u7emusti.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFNwRPNCkk5xA7v2c41_RB2Rg33o55DTw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "924296680961-njncmae0sd1cc92oq5llmd56u7emusti.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

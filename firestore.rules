@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function để kiểm tra user đã đăng nhập
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function để kiểm tra user có UID khớp với document
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Rules cho collection shops
+    // Chỉ user có UID khớp với document ID mới có quyền đọc/ghi
+    match /shops/{userId} {
+      // Cho phép đọc nếu là owner
+      allow read: if isOwner(userId);
+      
+      // Cho phép tạo mới nếu là owner
+      allow create: if isOwner(userId);
+      
+      // Cho phép cập nhật nếu là owner
+      allow update: if isOwner(userId);
+      
+      // Cho phép xóa nếu là owner
+      allow delete: if isOwner(userId);
+
+      // Rules cho subcollection products của shop
+      match /products/{productId} {
+        // Chỉ owner của shop mới có quyền đọc/ghi products
+        allow read, write: if isOwner(userId);
+      }
+
+      // Rules cho subcollection sales của shop
+      match /sales/{saleId} {
+        // Chỉ owner của shop mới có quyền đọc/ghi sales
+        allow read, write: if isOwner(userId);
+      }
+
+      // Rules cho subcollection purchases của shop
+      match /purchases/{purchaseId} {
+        // Chỉ owner của shop mới có quyền đọc/ghi purchases
+        allow read, write: if isOwner(userId);
+      }
+
+      // Rules cho subcollection categories của shop
+      match /categories/{categoryId} {
+        // Chỉ owner của shop mới có quyền đọc/ghi categories
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Deny tất cả các truy cập khác
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
