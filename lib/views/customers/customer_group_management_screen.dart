@@ -26,15 +26,7 @@ class _CustomerGroupManagementScreenState extends State<CustomerGroupManagementS
     return Scaffold(
       appBar: AppBar(
         title: const Text('Quản lý nhóm khách hàng'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.home),
-            onPressed: () {
-              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-            },
-            tooltip: 'Về trang chủ',
-          ),
-        ],
+        actions: const [],
       ),
       body: ResponsiveContainer(
         child: Consumer<CustomerProvider>(

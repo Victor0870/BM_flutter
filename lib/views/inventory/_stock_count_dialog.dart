@@ -169,7 +169,7 @@ class _StockCountDialogState extends State<StockCountDialog> {
               builder: (context, productProvider, child) {
                 final products = productProvider.products;
                 return DropdownButtonFormField<ProductModel>(
-                  value: _selectedProduct,
+                  initialValue: _selectedProduct,
                   decoration: InputDecoration(
                     labelText: 'Chọn sản phẩm',
                     border: OutlineInputBorder(

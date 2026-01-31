@@ -135,10 +135,10 @@ class _BranchManagementScreenState extends State<BranchManagementScreen> {
                     success = await branchProvider.updateBranch(branchToSave);
                   }
 
-                  if (mounted) {
-                    Navigator.pop(context);
-                    if (success) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                  if (!context.mounted) return;
+                  Navigator.pop(context);
+                  if (success) {
+                    ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
                             branch == null
@@ -148,17 +148,16 @@ class _BranchManagementScreenState extends State<BranchManagementScreen> {
                           backgroundColor: Colors.green,
                         ),
                       );
-                      await _refreshBranches();
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            branchProvider.errorMessage ?? 'Có lỗi xảy ra',
-                          ),
-                          backgroundColor: Colors.red,
+                    await _refreshBranches();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          branchProvider.errorMessage ?? 'Có lỗi xảy ra',
                         ),
-                      );
-                    }
+                        backgroundColor: Colors.red,
+                      ),
+                    );
                   }
                 }
               },

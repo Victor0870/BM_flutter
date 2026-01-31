@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/product_model.dart';
 import '../models/category_model.dart';
@@ -21,6 +22,7 @@ class ProductProvider with ChangeNotifier {
   String? _errorMessage;
   String? _searchQuery;
   bool _disposed = false; // Flag để kiểm tra xem provider đã bị dispose chưa
+  StreamSubscription<List<ProductModel>>? _productsSubscription; // Real-time Firestore (PRO)
 
   // Getters
   List<ProductModel> get products => _products;
@@ -43,10 +45,12 @@ class ProductProvider with ChangeNotifier {
     // Lắng nghe thay đổi từ AuthProvider để cập nhật ProductService
     authProvider.addListener(_onAuthChanged);
     _initializeService();
-    
+    // PRO: bắt đầu lắng nghe Firestore real-time ngay khi provider khởi tạo (nếu đã đăng nhập + isPro)
+    if (authProvider.user != null && authProvider.isPro) {
+      startListening();
+    }
     // Lắng nghe thay đổi selectedBranchId để reload products
     authProvider.addListener(_onSelectedBranchChanged);
-    
     // Lắng nghe thay đổi currentBranchId từ BranchProvider
     if (branchProvider != null) {
       branchProvider!.addListener(_onBranchChanged);
@@ -81,9 +85,8 @@ class ProductProvider with ChangeNotifier {
     final isPro = authProvider.isPro;
 
     if (user != null) {
-      // Nếu user đăng nhập hoặc nâng cấp lên PRO
       final wasPro = _productService?.isPro ?? false;
-      
+
       _productService = ProductService(
         isPro: isPro,
         userId: user.uid,
@@ -93,20 +96,53 @@ class ProductProvider with ChangeNotifier {
         userId: user.uid,
       );
 
-      // Nếu nâng cấp từ BASIC lên PRO, thực hiện migration
       if (!wasPro && isPro) {
         migrateLocalToCloud();
       } else {
-        // Load lại products
         loadProducts();
       }
+
+      if (isPro) {
+        startListening();
+        // PRO: light sync từ Cloud để cập nhật tồn kho/dữ liệu mới nhất (loadProducts đã gọi ở trên khi wasPro)
+        _performLightSyncFromCloud();
+      } else {
+        _cancelProductsSubscription();
+      }
     } else {
-      // User đăng xuất
+      _cancelProductsSubscription();
       _productService = null;
       _stockHistoryService = null;
       _products = [];
       notifyListeners();
     }
+  }
+
+  /// Light sync: lấy danh sách sản phẩm từ Cloud một lần, cập nhật SQLite và _products. Chỉ cho PRO.
+  void _performLightSyncFromCloud() {
+    if (_productService == null || !authProvider.isPro) return;
+    _productService!.fetchProductsFromCloud(includeInactive: false).then((products) {
+      if (_disposed) return;
+      if (products.isEmpty) return;
+      _products = products;
+      if (!kIsWeb) {
+        _productService?.syncProductsToLocal(products);
+      }
+      _safeNotifyListeners();
+      if (kDebugMode) {
+        debugPrint('✅ ProductProvider light sync: ${products.length} products from Cloud');
+      }
+    }).catchError((e, st) {
+      if (kDebugMode) {
+        debugPrint('⚠️ ProductProvider light sync error: $e');
+      }
+    });
+  }
+
+  /// Hủy subscription real-time (khi logout hoặc chuyển BASIC).
+  void _cancelProductsSubscription() {
+    _productsSubscription?.cancel();
+    _productsSubscription = null;
   }
 
   /// Xử lý khi selectedBranchId thay đổi
@@ -520,19 +556,31 @@ class ProductProvider with ChangeNotifier {
     }
   }
 
-  /// Lắng nghe thay đổi real-time (chỉ cho PRO)
+  /// Lắng nghe thay đổi real-time từ Firestore (chỉ cho PRO). Tự cập nhật _products và UI.
   void startListening() {
-    if (_productService == null || !authProvider.isPro) {
-      return;
-    }
+    if (_productService == null || !authProvider.isPro) return;
+
+    _cancelProductsSubscription();
 
     final stream = _productService!.watchProducts();
-    if (stream != null) {
-      stream.listen((products) {
+    if (stream == null) return;
+
+    _productsSubscription = stream.listen(
+      (products) {
+        if (_disposed) return;
         _products = products;
-        notifyListeners();
-      });
-    }
+        _safeNotifyListeners();
+        // Đồng bộ xuống SQLite để khi mất mạng vẫn có dữ liệu mới nhất (không chạy trên web)
+        if (!kIsWeb) {
+          _productService?.syncProductsToLocal(products);
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        if (kDebugMode) {
+          debugPrint('ProductProvider watchProducts error: $e');
+        }
+      },
+    );
   }
 
   /// Clear search query

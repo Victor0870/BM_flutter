@@ -1,7 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -146,12 +145,13 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
 
     if (confirmed != true) return;
 
+    if (!mounted) return;
+    final authProvider = context.read<AuthProvider>();
     setState(() {
       _isBulkIssuing = true;
     });
 
     try {
-      final authProvider = context.read<AuthProvider>();
       final firebaseService = FirebaseService();
       final shop = await firebaseService.getShopData(authProvider.user!.uid);
       

@@ -396,6 +396,6 @@ class SalesReturnService {
     DateTime? endDate,
   }) async {
     final salesReturns = await getSalesReturns(startDate: startDate, endDate: endDate);
-    return salesReturns.fold<double>(0.0, (sum, salesReturn) => sum + salesReturn.totalRefundAmount);
+    return salesReturns.fold<double>(0.0, (total, salesReturn) => total + salesReturn.totalRefundAmount);
   }
 }

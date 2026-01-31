@@ -194,6 +194,7 @@ class _SaleDetailScreenState extends State<SaleDetailScreen> {
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
                     }
+                    if (!context.mounted) return;
                     Navigator.pop(context);
                   },
                   child: const Text('Mở link'),
@@ -591,14 +592,13 @@ class _SaleDetailScreenState extends State<SaleDetailScreen> {
                                     mode: LaunchMode.externalApplication,
                                   );
                                 } else {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Không thể mở link'),
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    );
-                                  }
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Không thể mở link'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
                                 }
                               },
                               icon: const Icon(Icons.open_in_browser),

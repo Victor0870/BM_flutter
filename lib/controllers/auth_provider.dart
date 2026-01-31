@@ -51,6 +51,9 @@ class AuthProvider with ChangeNotifier {
   bool get isAdminUser => _userProfile?.isAdmin ?? false;
   bool get isStaffUser => _userProfile?.isStaff ?? false;
 
+  /// Cho phép cập nhật nhanh tồn kho tại danh sách sản phẩm (từ shop).
+  bool get allowQuickStockUpdate => _shop?.allowQuickStockUpdate ?? true;
+
   AuthProvider() {
     _initializeFirebase();
     _loadSelectedBranchId();
@@ -333,8 +336,14 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Trên Mobile (Android/iOS) mới lưu/đọc email + mật khẩu cho "Ghi nhớ mật khẩu"
+  bool get _isMobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
   /// Đăng nhập với email và password
-  /// [rememberMe] nếu true, sẽ lưu email vào SharedPreferences (KHÔNG lưu mật khẩu)
+  /// [rememberMe] nếu true và chạy trên Mobile: lưu email + mật khẩu vào SharedPreferences
   Future<bool> signInWithEmailAndPassword(
     String email,
     String password, {
@@ -358,12 +367,20 @@ class AuthProvider with ChangeNotifier {
       );
 
       if (credential.user != null) {
-        // Lưu email nếu người dùng chọn "Ghi nhớ tài khoản"
-        if (rememberMe) {
-          await _saveRememberedEmail(email);
+        // Chỉ lưu thông tin đăng nhập trên Mobile khi chọn "Ghi nhớ mật khẩu"
+        if (_isMobile) {
+          if (rememberMe) {
+            await _saveRememberedCredentials(email, password);
+          } else {
+            await _clearRememberedCredentials();
+          }
         } else {
-          // Xóa email đã lưu nếu không chọn ghi nhớ
-          await _clearRememberedEmail();
+          // Web/Desktop: chỉ lưu email nếu rememberMe (giữ tương thích)
+          if (rememberMe) {
+            await _saveRememberedEmail(email);
+          } else {
+            await _clearRememberedEmail();
+          }
         }
 
         // checkAuthStatus sẽ được gọi tự động qua authStateChanges listener
@@ -388,7 +405,39 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Lưu email vào SharedPreferences (chỉ email, không lưu mật khẩu)
+  /// Lưu email + mật khẩu (chỉ gọi trên Mobile)
+  Future<void> _saveRememberedCredentials(String email, String password) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('remembered_email', email);
+      await prefs.setString('remembered_password', password);
+      if (kDebugMode) {
+        debugPrint('✅ Đã lưu thông tin đăng nhập (Mobile)');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Lỗi khi lưu thông tin đăng nhập: $e');
+      }
+    }
+  }
+
+  /// Xóa email + mật khẩu đã lưu
+  Future<void> _clearRememberedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('remembered_email');
+      await prefs.remove('remembered_password');
+      if (kDebugMode) {
+        debugPrint('✅ Đã xóa thông tin đăng nhập đã lưu');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Lỗi khi xóa: $e');
+      }
+    }
+  }
+
+  /// Lưu email vào SharedPreferences (dùng cho Web/Desktop khi rememberMe)
   Future<void> _saveRememberedEmail(String email) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -426,6 +475,20 @@ class AuthProvider with ChangeNotifier {
     } catch (e) {
       if (kDebugMode) {
         debugPrint('❌ Lỗi khi đọc email: $e');
+      }
+      return null;
+    }
+  }
+
+  /// Lấy mật khẩu đã lưu (chỉ trên Mobile, nếu có)
+  Future<String?> getRememberedPassword() async {
+    if (!_isMobile) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('remembered_password');
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Lỗi khi đọc mật khẩu: $e');
       }
       return null;
     }
@@ -483,6 +546,9 @@ class AuthProvider with ChangeNotifier {
             debugPrint('✅ Shop created successfully in Firestore for user: ${user.uid}');
             debugPrint('License expires on: ${licenseEndDate.toIso8601String()}');
           }
+
+          // Khởi tạo dữ liệu mẫu (chạy nền, không chặn luồng đăng ký)
+          _initializeSampleData(user.uid);
         } catch (e) {
           if (kDebugMode) {
             debugPrint('❌ Error creating shop in Firestore: $e');
@@ -514,6 +580,66 @@ class AuthProvider with ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Khởi tạo dữ liệu mẫu cho shop mới (nhóm khách hàng VIP + 2 khách hàng mẫu).
+  /// Dùng Batch Write để tạo đồng thời hoặc không tạo cái nào nếu lỗi.
+  /// Chạy nền (fire-and-forget) để không chặn luồng đăng ký.
+  static void _initializeSampleData(String shopId) {
+    Future<void>.microtask(() async {
+      try {
+        final firestore = FirebaseFirestore.instance;
+        final batch = firestore.batch();
+
+        final groupsRef = firestore.collection('shops').doc(shopId).collection('customer_groups');
+        final customersRef = firestore.collection('shops').doc(shopId).collection('customers');
+
+        // 1. Nhóm khách hàng VIP (auto ID)
+        final vipGroupRef = groupsRef.doc();
+        batch.set(vipGroupRef, {
+          'name': 'Khách hàng VIP',
+          'discountPercent': 5.0,
+          'description': 'Nhóm khách hàng thân thiết, ưu đãi 5%',
+          'shopId': shopId,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // 2. Khách hàng mẫu 1 (Nguyễn Văn A, thuộc nhóm VIP)
+        final customer1Ref = customersRef.doc();
+        batch.set(customer1Ref, {
+          'name': 'Nguyễn Văn A',
+          'phone': '0901234567',
+          'address': 'Hà Nội',
+          'shopId': shopId,
+          'groupId': vipGroupRef.id,
+          'totalDebt': 0.0,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // 3. Khách hàng mẫu 2 (Trần Thị B, không nhóm)
+        final customer2Ref = customersRef.doc();
+        batch.set(customer2Ref, {
+          'name': 'Trần Thị B',
+          'phone': '0987654321',
+          'address': 'TP.HCM',
+          'shopId': shopId,
+          'totalDebt': 0.0,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        await batch.commit();
+        if (kDebugMode) {
+          debugPrint('✅ Sample data initialized for shop: $shopId (VIP group + 2 customers)');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('⚠️ _initializeSampleData error for shop $shopId: $e');
+        }
+      }
+    });
   }
 
   /// Đăng ký nhân viên với email, password và shopId

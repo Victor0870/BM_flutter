@@ -38,31 +38,30 @@ class _BranchSelectorWidgetState extends State<BranchSelectorWidget> {
       await branchProvider.setSelectedBranch(newBranchId);
       
       // Refresh các provider khác
+      if (!context.mounted) return;
       final productProvider = Provider.of<ProductProvider>(context, listen: false);
       
       // Load lại dữ liệu theo chi nhánh mới
       // Sales và Purchase sẽ tự động lọc theo branchId khi được gọi
       await productProvider.loadProducts();
       
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Đã chuyển sang chi nhánh: ${branchProvider.branches.firstWhere((b) => b.id == newBranchId).name}'),
-            duration: const Duration(seconds: 2),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đã chuyển sang chi nhánh: ${branchProvider.branches.firstWhere((b) => b.id == newBranchId).name}'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Lỗi khi chuyển chi nhánh: $e'),
-            duration: const Duration(seconds: 3),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Lỗi khi chuyển chi nhánh: $e'),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {

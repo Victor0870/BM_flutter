@@ -9,6 +9,8 @@ import '../../controllers/product_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../models/inventory_report_model.dart';
 import '../../widgets/responsive_container.dart';
+import '../../widgets/ad_banner_widget.dart';
+
 
 class InventoryReportScreen extends StatefulWidget {
   const InventoryReportScreen({super.key});
@@ -25,11 +27,90 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  bool _isMobileLayout(BuildContext context) => isMobile(context);
+
+  void _showDateRangeBottomSheet() {
+    final dateFormat = DateFormat('dd/MM/yyyy');
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + MediaQuery.of(context).padding.bottom,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Chọn khoảng thời gian',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.calendar_today, color: Color(0xFF64748B)),
+                title: const Text('Từ ngày'),
+                subtitle: Text(dateFormat.format(_startDate)),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _startDate,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) setState(() => _startDate = picked);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today, color: Color(0xFF64748B)),
+                title: const Text('Đến ngày'),
+                subtitle: Text(dateFormat.format(_endDate)),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _endDate,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) setState(() => _endDate = picked);
+                },
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade600,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Xong'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isDesktop =
         !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    final double maxWidth = isDesktop ? 1200 : 800;
+    final double maxWidth = isDesktop ? kBreakpointTablet : kContentMaxWidth;
+    final isMobile = _isMobileLayout(context);
 
     return Scaffold(
       appBar: isDesktop
@@ -49,18 +130,21 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Báo cáo Xuất - Nhập - Tồn',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0F172A),
+                    Flexible(
+                      child: Text(
+                        'Báo cáo Xuất - Nhập - Tồn',
+                        style: TextStyle(
+                          fontSize: isMobile ? 20 : 24,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF0F172A),
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     ElevatedButton.icon(
                       onPressed: _generateReport,
                       icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Tạo báo cáo'),
+                      label: Text(isMobile ? 'Tạo báo cáo' : 'Tạo báo cáo'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue.shade600,
                         foregroundColor: Colors.white,
@@ -69,47 +153,44 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Filters
-                Row(
-                  children: [
-                    // Bộ lọc thời gian
-                    Expanded(
-                      child: _DateRangeFilter(
-                        startDate: _startDate,
-                        endDate: _endDate,
-                        onStartDateChanged: (date) {
-                          setState(() {
-                            _startDate = date;
-                          });
-                        },
-                        onEndDateChanged: (date) {
-                          setState(() {
-                            _endDate = date;
-                          });
-                        },
+                // Filters: Desktop = Row, Mobile = Column + nút mở BottomSheet cho ngày
+                if (isMobile)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _showDateRangeBottomSheet,
+                        icon: const Icon(Icons.date_range, size: 18),
+                        label: Text(
+                          '${DateFormat('dd/MM/yyyy').format(_startDate)} - ${DateFormat('dd/MM/yyyy').format(_endDate)}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          alignment: Alignment.centerLeft,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    // Bộ lọc chi nhánh
-                    Consumer<BranchProvider>(
-                      builder: (context, branchProvider, child) {
-                        final branches = branchProvider.branches.where((b) => b.isActive).toList();
-                        final items = <DropdownMenuItem<String?>>[
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('Tất cả chi nhánh'),
-                          ),
-                          ...branches.map(
-                            (b) => DropdownMenuItem<String?>(
-                              value: b.id,
-                              child: Text(b.name),
+                      const SizedBox(height: 10),
+                      Consumer<BranchProvider>(
+                        builder: (context, branchProvider, child) {
+                          final branches =
+                              branchProvider.branches.where((b) => b.isActive).toList();
+                          final items = <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('Tất cả chi nhánh'),
                             ),
-                          ),
-                        ];
-
-                        return SizedBox(
-                          width: 200,
-                          child: Container(
+                            ...branches.map(
+                              (b) => DropdownMenuItem<String?>(
+                                value: b.id,
+                                child: Text(b.name),
+                              ),
+                            ),
+                          ];
+                          return Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
                             decoration: BoxDecoration(
                               color: Colors.white,
@@ -127,15 +208,77 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
                                 });
                               },
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
+                          );
+                        },
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DateRangeFilter(
+                          startDate: _startDate,
+                          endDate: _endDate,
+                          onStartDateChanged: (date) {
+                            setState(() {
+                              _startDate = date;
+                            });
+                          },
+                          onEndDateChanged: (date) {
+                            setState(() {
+                              _endDate = date;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Consumer<BranchProvider>(
+                        builder: (context, branchProvider, child) {
+                          final branches =
+                              branchProvider.branches.where((b) => b.isActive).toList();
+                          final items = <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('Tất cả chi nhánh'),
+                            ),
+                            ...branches.map(
+                              (b) => DropdownMenuItem<String?>(
+                                value: b.id,
+                                child: Text(b.name),
+                              ),
+                            ),
+                          ];
+                          return SizedBox(
+                            width: 200,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: DropdownButton<String?>(
+                                value: _selectedBranchId,
+                                isExpanded: true,
+                                underline: const SizedBox(),
+                                items: items,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedBranchId = value;
+                                  });
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
+          const AdBannerWidget(),
           const Divider(height: 1),
           // Data Table
           Expanded(
@@ -223,8 +366,10 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
-        child: DataTable(
-          headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 600),
+          child: DataTable(
+          headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
           columnSpacing: 16,
           columns: const [
             DataColumn(
@@ -379,7 +524,7 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
             }),
             // Tổng hợp
             DataRow(
-              color: MaterialStateProperty.all(Colors.blue.shade50),
+              color: WidgetStateProperty.all(Colors.blue.shade50),
               cells: [
                 const DataCell(
                   Text(
@@ -449,6 +594,7 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
               ],
             ),
           ],
+        ),
         ),
       ),
     );

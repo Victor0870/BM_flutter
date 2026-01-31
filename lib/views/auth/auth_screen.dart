@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../controllers/auth_provider.dart';
+import '../../widgets/responsive_container.dart';
 
 /// Màn hình đăng nhập và đăng ký
 class AuthScreen extends StatefulWidget {
@@ -22,14 +24,20 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isOwner = true; // true: Chủ shop, false: Nhân viên
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-  bool _rememberMe = false; // Checkbox "Ghi nhớ tài khoản"
+  bool _rememberMe = false; // Checkbox "Ghi nhớ mật khẩu"
   bool _isScanning = false;
+
+  /// Chỉ trên Mobile (Android/iOS) mới lưu/điền mật khẩu
+  bool get _isMobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   @override
   void initState() {
     super.initState();
-    // Tự động điền email đã lưu (nếu có) khi mở màn hình
-    _loadRememberedEmail();
+    // Tự động điền email (và mật khẩu trên Mobile) đã lưu khi mở màn hình
+    _loadRememberedCredentials();
   }
 
   @override
@@ -41,19 +49,35 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  /// Tải email đã ghi nhớ từ SharedPreferences
-  Future<void> _loadRememberedEmail() async {
+  /// Tải email (và mật khẩu trên Mobile) đã ghi nhớ từ SharedPreferences
+  Future<void> _loadRememberedCredentials() async {
+    if (!mounted) return;
     try {
       final authProvider = context.read<AuthProvider>();
       final rememberedEmail = await authProvider.getRememberedEmail();
       if (rememberedEmail != null && rememberedEmail.isNotEmpty) {
-        setState(() {
-          _emailController.text = rememberedEmail;
-          _rememberMe = true; // Tự động check checkbox nếu có email đã lưu
-        });
+        if (_isMobile) {
+          final rememberedPassword = await authProvider.getRememberedPassword();
+          if (mounted) {
+            setState(() {
+              _emailController.text = rememberedEmail;
+              if (rememberedPassword != null && rememberedPassword.isNotEmpty) {
+                _passwordController.text = rememberedPassword;
+              }
+              _rememberMe = true;
+            });
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _emailController.text = rememberedEmail;
+              _rememberMe = true;
+            });
+          }
+        }
       }
     } catch (e) {
-      // Bỏ qua lỗi khi load email
+      // Bỏ qua lỗi khi load
     }
   }
 
@@ -218,8 +242,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isDesktop = size.width > 600;
+    final useWideLayout = !isMobile(context);
 
     return Scaffold(
       body: SafeArea(
@@ -227,7 +250,7 @@ class _AuthScreenState extends State<AuthScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Container(
-              width: isDesktop ? 450 : double.infinity,
+              width: useWideLayout ? 450 : double.infinity,
               constraints: const BoxConstraints(maxWidth: 450),
               child: Form(
                 key: _formKey,
@@ -378,7 +401,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Checkbox "Ghi nhớ tài khoản" (chỉ hiện khi đăng nhập)
+                    // Checkbox "Ghi nhớ mật khẩu" (chỉ hiện khi đăng nhập)
                     if (_isLogin) ...[
                       Row(
                         children: [
@@ -398,7 +421,9 @@ class _AuthScreenState extends State<AuthScreen> {
                                 });
                               },
                               child: Text(
-                                'Ghi nhớ tài khoản',
+                                _isMobile
+                                    ? 'Ghi nhớ mật khẩu'
+                                    : 'Ghi nhớ tài khoản',
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),

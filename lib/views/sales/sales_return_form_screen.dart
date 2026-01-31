@@ -44,6 +44,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
   // Form fields
   String _selectedReason = 'Lỗi NSX';
   String _selectedPaymentMethod = 'CASH';
+  final TextEditingController _reasonOtherController = TextEditingController();
   
   // Danh sách lý do trả hàng
   final List<String> _returnReasons = [
@@ -86,11 +87,18 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
     _saleIdController.removeListener(_onSearchTextChanged);
     _searchDebounceTimer?.cancel();
     _saleIdController.dispose();
+    _reasonOtherController.dispose();
     for (var controller in _returnQuantityControllers.values) {
       controller.dispose();
     }
     super.dispose();
   }
+
+  /// Lý do trả hàng dùng khi lưu / hiển thị: nếu chọn "Khác" thì dùng nội dung ô nhập.
+  String get _effectiveReason =>
+      _selectedReason == 'Khác'
+          ? _reasonOtherController.text.trim()
+          : _selectedReason;
 
   /// Load danh sách hóa đơn gần đây (30 ngày gần nhất)
   Future<void> _loadRecentSales() async {
@@ -304,6 +312,10 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
       _errorMessage = 'Vui lòng chọn lý do trả hàng';
       return false;
     }
+    if (_selectedReason == 'Khác' && _reasonOtherController.text.trim().isEmpty) {
+      _errorMessage = 'Vui lòng nhập lý do trả hàng khác';
+      return false;
+    }
 
     return true;
   }
@@ -341,6 +353,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
       }
     }
 
+    if (!mounted) return false;
     return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -362,7 +375,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Lý do: $_selectedReason',
+              'Lý do: $_effectiveReason',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
           ],
@@ -406,6 +419,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
     });
 
     try {
+      if (!mounted) return;
       final authProvider = context.read<AuthProvider>();
       final branchProvider = context.read<BranchProvider>();
       
@@ -421,7 +435,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
         throw Exception('Chưa chọn chi nhánh');
       }
 
-      // Tạo SalesReturnModel
+      // Tạo SalesReturnModel (dùng _effectiveReason: nếu "Khác" thì lấy nội dung ô nhập)
       final salesReturn = SalesReturnModel(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         originalSaleId: _originalSale!.id,
@@ -429,7 +443,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
         branchId: branchId,
         items: returnItems,
         totalRefundAmount: totalRefund,
-        reason: _selectedReason,
+        reason: _effectiveReason,
         paymentMethod: _selectedPaymentMethod,
         timestamp: DateTime.now(),
         userId: authProvider.user!.uid,
@@ -922,7 +936,7 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
                         const SizedBox(height: 16),
                         // Dropdown lý do trả hàng
                         DropdownButtonFormField<String>(
-                          value: _selectedReason,
+                          initialValue: _selectedReason,
                           decoration: const InputDecoration(
                             labelText: 'Lý do trả hàng',
                             border: OutlineInputBorder(),
@@ -940,10 +954,24 @@ class _SalesReturnFormScreenState extends State<SalesReturnFormScreen> {
                             });
                           },
                         ),
+                        if (_selectedReason == 'Khác') ...[
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _reasonOtherController,
+                            decoration: const InputDecoration(
+                              labelText: 'Lý do khác',
+                              hintText: 'Nhập lý do trả hàng...',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.edit_note),
+                            ),
+                            maxLines: 2,
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         // Dropdown phương thức hoàn tiền
                         DropdownButtonFormField<String>(
-                          value: _selectedPaymentMethod,
+                          initialValue: _selectedPaymentMethod,
                           decoration: const InputDecoration(
                             labelText: 'Phương thức hoàn tiền',
                             border: OutlineInputBorder(),

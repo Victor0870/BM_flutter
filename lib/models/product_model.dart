@@ -26,7 +26,7 @@ class ProductVariant {
   double get price => branchPrices.values.isNotEmpty ? branchPrices.values.first : 0.0;
 
   /// Tồn kho mặc định (backward compatibility - tổng tồn kho tất cả chi nhánh)
-  double get stock => branchStock.values.fold(0.0, (sum, stock) => sum + stock);
+  double get stock => branchStock.values.fold(0.0, (total, stock) => total + stock);
 
   /// Tạo ProductVariant từ Map
   factory ProductVariant.fromMap(Map<String, dynamic> map) {
@@ -181,9 +181,9 @@ class ProductModel {
 
   /// Tồn kho mặc định (backward compatibility - tổng tồn kho tất cả chi nhánh và variants)
   double get stock {
-    double total = branchStock.values.fold(0.0, (sum, stock) => sum + stock);
+    double total = branchStock.values.fold(0.0, (acc, stock) => acc + stock);
     if (variants.isNotEmpty) {
-      total = variants.fold(0.0, (sum, variant) => sum + variant.stock);
+      total = variants.fold(0.0, (acc, variant) => acc + variant.stock);
     }
     return total;
   }
@@ -527,7 +527,7 @@ class ProductModel {
     // Tính tổng stock từ variants nếu có
     double totalStock = stock;
     if (variants.isNotEmpty) {
-      totalStock = variants.fold(0.0, (sum, variant) => sum + variant.stock);
+      totalStock = variants.fold(0.0, (acc, variant) => acc + variant.stock);
     }
 
     return {
@@ -564,7 +564,7 @@ class ProductModel {
     // Tính tổng stock từ variants nếu có
     double totalStock = stock;
     if (variants.isNotEmpty) {
-      totalStock = variants.fold(0.0, (sum, variant) => sum + variant.stock);
+      totalStock = variants.fold(0.0, (acc, variant) => acc + variant.stock);
     }
 
     return {
@@ -601,7 +601,7 @@ class ProductModel {
     // Tính tổng stock từ variants nếu có
     double totalStock = stock;
     if (variants.isNotEmpty) {
-      totalStock = variants.fold(0.0, (sum, variant) => sum + variant.stock);
+      totalStock = variants.fold(0.0, (acc, variant) => acc + variant.stock);
     }
 
     // Lưu variants dạng JSON string (SQLite không hỗ trợ array/list trực tiếp)

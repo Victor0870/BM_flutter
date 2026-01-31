@@ -179,7 +179,7 @@ class _PaymentQRDialogState extends State<PaymentQRDialog> {
                       width: 250,
                       height: 250,
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Center(
@@ -192,7 +192,7 @@ class _PaymentQRDialogState extends State<PaymentQRDialog> {
                       width: 250,
                       height: 250,
                       decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.9),
+                        color: Colors.green.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Icon(
@@ -281,14 +281,14 @@ class _PaymentQRDialogState extends State<PaymentQRDialog> {
                         });
                         await widget.salesProvider.completeTransferPayment(widget.orderId);
                         await Future.delayed(const Duration(milliseconds: 500));
-                        if (mounted) {
-                          Navigator.of(context).pop();
-                          if (widget.onPaymentSuccess != null) {
-                            widget.onPaymentSuccess!();
-                          }
+                        if (!context.mounted) return;
+                        Navigator.of(context).pop();
+                        if (widget.onPaymentSuccess != null) {
+                          widget.onPaymentSuccess!();
                         }
                       } else {
                         // Chưa nhận được tiền, yêu cầu xác nhận thủ công
+                        if (!context.mounted) return;
                         final confirmed = await showDialog<bool>(
                           context: context,
                           builder: (context) => AlertDialog(
@@ -318,11 +318,10 @@ class _PaymentQRDialogState extends State<PaymentQRDialog> {
                           });
                           await widget.salesProvider.completeTransferPayment(widget.orderId);
                           await Future.delayed(const Duration(milliseconds: 500));
-                          if (mounted) {
-                            Navigator.of(context).pop();
-                            if (widget.onPaymentSuccess != null) {
-                              widget.onPaymentSuccess!();
-                            }
+                          if (!context.mounted) return;
+                          Navigator.of(context).pop();
+                          if (widget.onPaymentSuccess != null) {
+                            widget.onPaymentSuccess!();
                           }
                         }
                       }

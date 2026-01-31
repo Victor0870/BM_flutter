@@ -464,13 +464,34 @@ class SalesService {
     }
   }
 
+  /// Lắng nghe thay đổi real-time từ Firestore (chỉ cho PRO và Web).
+  /// Khi có đơn hàng mới từ thiết bị khác, stream sẽ emit danh sách sales mới.
+  Stream<List<SaleModel>>? watchSales() {
+    if (!isPro && !kIsWeb) {
+      return null;
+    }
+    try {
+      return _salesCollection
+          .orderBy('timestamp', descending: true)
+          .snapshots()
+          .map((snapshot) => snapshot.docs
+              .map((doc) => SaleModel.fromFirestore(doc.data(), doc.id))
+              .toList());
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error watching sales from Firestore: $e');
+      }
+      return null;
+    }
+  }
+
   /// Lấy tổng doanh thu trong khoảng thời gian
   Future<double> getTotalRevenue({
     DateTime? startDate,
     DateTime? endDate,
   }) async {
     final sales = await getSales(startDate: startDate, endDate: endDate);
-    return sales.fold<double>(0.0, (sum, sale) => sum + sale.totalAmount);
+    return sales.fold<double>(0.0, (total, sale) => total + sale.totalAmount);
   }
 
   /// Lấy doanh thu hôm nay
@@ -505,7 +526,7 @@ class SalesService {
         return sale.timestamp.isAfter(startOfDay) && sale.timestamp.isBefore(endOfDay);
       }).toList();
 
-      return todaySales.fold<double>(0.0, (sum, sale) => sum + sale.totalAmount);
+      return todaySales.fold<double>(0.0, (total, sale) => total + sale.totalAmount);
     }
   }
 

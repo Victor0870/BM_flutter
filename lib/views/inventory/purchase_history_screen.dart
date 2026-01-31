@@ -154,7 +154,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                         child: ListTile(
                           leading: CircleAvatar(
                             backgroundColor: _getStatusColor(purchase.status)
-                                .withOpacity(0.2),
+                                .withValues(alpha: 0.2),
                             child: Icon(
                               purchase.status == 'COMPLETED'
                                   ? Icons.check_circle
@@ -180,7 +180,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                                 label: Text(_getStatusText(purchase.status)),
                                 backgroundColor:
                                     _getStatusColor(purchase.status)
-                                        .withOpacity(0.2),
+                                        .withValues(alpha: 0.2),
                                 labelStyle: TextStyle(
                                   color: _getStatusColor(purchase.status),
                                   fontSize: 12,

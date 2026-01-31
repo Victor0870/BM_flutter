@@ -149,6 +149,9 @@ class ShopModel {
   // Cấu hình đăng ký nhân viên
   final bool allowRegistration; // Cho phép nhân viên đăng ký (mặc định false)
   
+  // Cấu hình cập nhật tồn kho
+  final bool allowQuickStockUpdate; // Cho phép cập nhật nhanh tồn kho tại danh sách (mặc định true)
+  
   // Các trường khác có thể có
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -171,11 +174,26 @@ class ShopModel {
     this.allowNegativeStock = false,
     this.enableCostPrice = true,
     this.allowRegistration = false,
+    this.allowQuickStockUpdate = true,
     this.createdAt,
     this.updatedAt,
     this.settings,
     this.isActive = true,
   });
+
+  /// Parse ngày từ Firestore (Timestamp hoặc chuỗi ISO) — tránh crash khi định dạng khác.
+  static DateTime? _parseFirestoreDate(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) {
+      try {
+        return DateTime.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
 
   /// Tạo ShopModel từ Firestore document
   factory ShopModel.fromFirestore(Map<String, dynamic> data, String id) {
@@ -195,18 +213,13 @@ class ShopModel {
           ? PaymentConfig.fromMap(Map<String, dynamic>.from(data['paymentConfig']))
           : null,
       packageType: data['packageType'] ?? 'BASIC',
-      licenseEndDate: data['licenseEndDate'] != null
-          ? (data['licenseEndDate'] as Timestamp).toDate()
-          : null,
-      createdAt: data['createdAt'] != null
-          ? (data['createdAt'] as Timestamp).toDate()
-          : null,
-      updatedAt: data['updatedAt'] != null
-          ? (data['updatedAt'] as Timestamp).toDate()
-          : null,
+      licenseEndDate: _parseFirestoreDate(data['licenseEndDate']),
+      createdAt: _parseFirestoreDate(data['createdAt']),
+      updatedAt: _parseFirestoreDate(data['updatedAt']),
       allowNegativeStock: data['allowNegativeStock'] ?? false,
       enableCostPrice: data['enableCostPrice'] ?? true,
       allowRegistration: data['allowRegistration'] ?? false,
+      allowQuickStockUpdate: data['allowQuickStockUpdate'] ?? true,
       settings: data['settings'] != null
           ? Map<String, dynamic>.from(data['settings'])
           : null,
@@ -243,6 +256,8 @@ class ShopModel {
           : null,
       allowNegativeStock: json['allowNegativeStock'] ?? false,
       enableCostPrice: json['enableCostPrice'] ?? true,
+      allowRegistration: json['allowRegistration'] ?? false,
+      allowQuickStockUpdate: json['allowQuickStockUpdate'] ?? true,
       settings: json['settings'] != null
           ? Map<String, dynamic>.from(json['settings'])
           : null,
@@ -268,6 +283,7 @@ class ShopModel {
       'allowNegativeStock': allowNegativeStock,
       'enableCostPrice': enableCostPrice,
       'allowRegistration': allowRegistration,
+      'allowQuickStockUpdate': allowQuickStockUpdate,
       'createdAt': createdAt?.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'settings': settings,
@@ -294,6 +310,7 @@ class ShopModel {
       'allowNegativeStock': allowNegativeStock,
       'enableCostPrice': enableCostPrice,
       'allowRegistration': allowRegistration,
+      'allowQuickStockUpdate': allowQuickStockUpdate,
       'createdAt': createdAt != null
           ? Timestamp.fromDate(createdAt!)
           : null,
@@ -305,9 +322,12 @@ class ShopModel {
     };
   }
 
-  /// Kiểm tra xem license có còn hiệu lực không
+  /// Kiểm tra xem license có còn hiệu lực không.
+  /// PRO không có licenseEndDate (null) được coi là không giới hạn (valid).
   bool get isLicenseValid {
-    if (licenseEndDate == null) return false;
+    if (licenseEndDate == null) {
+      return packageType == 'PRO'; // PRO không hạn = unlimited
+    }
     return DateTime.now().isBefore(licenseEndDate!);
   }
 
@@ -328,6 +348,7 @@ class ShopModel {
     bool? allowNegativeStock,
     bool? enableCostPrice,
     bool? allowRegistration,
+    bool? allowQuickStockUpdate,
     DateTime? createdAt,
     DateTime? updatedAt,
     Map<String, dynamic>? settings,
@@ -349,6 +370,7 @@ class ShopModel {
       allowNegativeStock: allowNegativeStock ?? this.allowNegativeStock,
       enableCostPrice: enableCostPrice ?? this.enableCostPrice,
       allowRegistration: allowRegistration ?? this.allowRegistration,
+      allowQuickStockUpdate: allowQuickStockUpdate ?? this.allowQuickStockUpdate,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       settings: settings ?? this.settings,

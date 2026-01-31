@@ -47,6 +47,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   bool _allowNegativeStock = false;
   bool _enableCostPrice = true;
   bool _allowRegistration = false;
+  bool _allowQuickStockUpdate = true;
   
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -182,6 +183,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
         _allowNegativeStock = shop.allowNegativeStock;
         _enableCostPrice = shop.enableCostPrice;
         _allowRegistration = shop.allowRegistration;
+        _allowQuickStockUpdate = shop.allowQuickStockUpdate;
       });
     } else {
       if (kDebugMode) {
@@ -289,7 +291,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       
       if (kDebugMode) {
         debugPrint('💾 Saving Payment Config:');
-        debugPrint('  - provider: ${_selectedPaymentProvider}');
+        debugPrint('  - provider: $_selectedPaymentProvider');
         debugPrint('  - hasBankInfo: $hasBankInfo');
         debugPrint('  - hasAnyPaymentInfo: $hasAnyPaymentInfo');
         debugPrint('  - bankBin: ${_bankBinController.text.trim()}');
@@ -340,6 +342,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
         allowNegativeStock: _allowNegativeStock,
         enableCostPrice: _enableCostPrice,
         allowRegistration: _allowRegistration,
+        allowQuickStockUpdate: _allowQuickStockUpdate,
         updatedAt: DateTime.now(),
       );
 
@@ -421,7 +424,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<PaymentProvider>(
-                      value: _selectedPaymentProvider,
+                      initialValue: _selectedPaymentProvider,
                       decoration: const InputDecoration(
                         labelText: 'Nhà cung cấp thanh toán',
                         border: OutlineInputBorder(),
@@ -648,6 +651,204 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     );
   }
 
+  /// Card hiển thị thông tin tài khoản: email, gói dịch vụ (PRO/BASIC).
+  /// Layout khác nhau cho mobile và desktop (breakpoint từ responsive_container).
+  Widget _buildAccountInfoCard(BuildContext context) {
+    final isNarrow = isMobile(context);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        final email = authProvider.user?.email ?? '—';
+        final isPro = authProvider.isPro;
+
+        return Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.person_outline, color: colorScheme.primary),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Thông tin tài khoản',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: isNarrow
+                    ? _buildAccountInfoMobile(
+                        context,
+                        email: email,
+                        isPro: isPro,
+                        theme: theme,
+                        colorScheme: colorScheme,
+                      )
+                    : _buildAccountInfoDesktop(
+                        context,
+                        email: email,
+                        isPro: isPro,
+                        theme: theme,
+                        colorScheme: colorScheme,
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Layout dọc cho mobile: Email rồi đến gói dịch vụ.
+  Widget _buildAccountInfoMobile(
+    BuildContext context, {
+    required String email,
+    required bool isPro,
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.email_outlined, size: 20, color: colorScheme.onSurfaceVariant),
+          title: Text(
+            'Email đăng nhập',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          subtitle: SelectableText(
+            email,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildPlanBadgeAndNote(
+          context,
+          isPro: isPro,
+          theme: theme,
+          colorScheme: colorScheme,
+        ),
+      ],
+    );
+  }
+
+  /// Layout ngang cho desktop: Email bên trái, gói dịch vụ bên phải.
+  Widget _buildAccountInfoDesktop(
+    BuildContext context, {
+    required String email,
+    required bool isPro,
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.email_outlined, size: 20, color: colorScheme.onSurfaceVariant),
+            title: Text(
+              'Email đăng nhập',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            subtitle: SelectableText(
+              email,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 24),
+        Expanded(
+          child: _buildPlanBadgeAndNote(
+            context,
+            isPro: isPro,
+            theme: theme,
+            colorScheme: colorScheme,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Nhãn gói dịch vụ (PRO/BASIC) và chú thích / nút Nâng cấp.
+  Widget _buildPlanBadgeAndNote(
+    BuildContext context, {
+    required bool isPro,
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isPro
+                ? colorScheme.primaryContainer
+                : colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            isPro ? 'Gói dịch vụ: PRO' : 'Gói dịch vụ: BASIC',
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: isPro ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          isPro
+              ? 'Đã mở khóa đồng bộ Cloud và tính năng Real-time.'
+              : 'Chế độ Offline-only.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Nếu bạn vừa được gia hạn/nâng cấp gói, hãy đăng xuất rồi đăng nhập lại để áp dụng.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
+        ),
+        if (!isPro) ...[
+          const SizedBox(height: 12),
+          FilledButton.tonal(
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Liên hệ quản trị viên để nâng cấp lên gói PRO.'),
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            },
+            child: const Text('Nâng cấp'),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -671,6 +872,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
             child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Thông tin tài khoản
+              _buildAccountInfoCard(context),
+              const SizedBox(height: 16),
               // Nhóm 1: Thông tin cửa hàng
               Card(
                 child: Column(
@@ -1146,6 +1350,32 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         _enableCostPrice ? Icons.attach_money : Icons.money_off,
                         color: _enableCostPrice ? Colors.blue : Colors.grey,
                       ),
+                    ),
+                    Consumer<AuthProvider>(
+                      builder: (context, authProvider, _) {
+                        final isAdmin = authProvider.isAdminUser;
+                        return SwitchListTile(
+                          title: const Text('Cho phép cập nhật nhanh tồn kho'),
+                          subtitle: Text(
+                            _allowQuickStockUpdate
+                                ? 'Cho phép chỉnh sửa nhanh số lượng tồn kho tại danh sách sản phẩm'
+                                : 'Chỉ cho phép điều chỉnh tồn kho qua Phiếu nhập kho',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                          value: _allowQuickStockUpdate,
+                          onChanged: isAdmin
+                              ? (value) {
+                                  setState(() {
+                                    _allowQuickStockUpdate = value;
+                                  });
+                                }
+                              : null,
+                          secondary: Icon(
+                            _allowQuickStockUpdate ? Icons.edit_note : Icons.inventory_2_outlined,
+                            color: _allowQuickStockUpdate ? Colors.green : Colors.orange,
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

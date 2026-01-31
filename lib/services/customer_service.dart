@@ -31,14 +31,21 @@ class CustomerService {
   // ==================== CUSTOMER GROUPS ====================
 
   /// Lấy tất cả nhóm khách hàng
-  /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase
+  /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase.
+  /// PRO + không web: nếu SQLite trống thì đồng bộ từ Firestore (dữ liệu mẫu sau đăng ký).
   Future<List<CustomerGroupModel>> getCustomerGroups() async {
-    // Trên web, vẫn phải dùng Firestore
     if (kIsWeb) {
       return await _getCustomerGroupsFromFirestore();
     }
 
-    // TẤT CẢ các trường hợp khác: CHỈ đọc từ SQLite
+    if (isPro) {
+      final local = await _localDb.getCustomerGroups();
+      if (local.isEmpty) {
+        await _syncCustomerGroupsFromFirestoreToLocal();
+        return await _localDb.getCustomerGroups();
+      }
+      return local;
+    }
     return await _localDb.getCustomerGroups();
   }
 
@@ -63,6 +70,27 @@ class CustomerService {
         debugPrint('Error getting customer groups from Firestore: $e');
       }
       return [];
+    }
+  }
+
+  /// Đồng bộ nhóm khách hàng từ Firestore xuống SQLite (PRO, lần đầu sau đăng ký).
+  /// Dùng get() không orderBy để tránh lỗi index trên collection mới.
+  Future<void> _syncCustomerGroupsFromFirestoreToLocal() async {
+    try {
+      final snapshot = await _customerGroupsCollection.get();
+      final groups = snapshot.docs
+          .map((doc) => CustomerGroupModel.fromFirestore(doc.data(), doc.id))
+          .toList();
+      for (final g in groups) {
+        await _localDb.addCustomerGroup(g);
+      }
+      if (kDebugMode && groups.isNotEmpty) {
+        debugPrint('✅ Synced ${groups.length} customer groups from Firestore to SQLite');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error syncing customer groups Firestore->SQLite: $e');
+      }
     }
   }
 
@@ -215,12 +243,21 @@ class CustomerService {
   // ==================== CUSTOMERS ====================
 
   /// Lấy tất cả khách hàng
-  /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase
+  /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase.
+  /// PRO + không web: nếu SQLite trống thì đồng bộ từ Firestore (dữ liệu mẫu sau đăng ký).
   Future<List<CustomerModel>> getCustomers() async {
     if (kIsWeb) {
       return await _getCustomersFromFirestore();
     }
 
+    if (isPro) {
+      final local = await _localDb.getCustomers();
+      if (local.isEmpty) {
+        await _syncCustomersFromFirestoreToLocal();
+        return await _localDb.getCustomers();
+      }
+      return local;
+    }
     return await _localDb.getCustomers();
   }
 
@@ -234,11 +271,18 @@ class CustomerService {
   }
 
   /// Tìm kiếm khách hàng
+  /// PRO + không web: nếu SQLite trống thì đồng bộ từ Firestore trước (để tìm được dữ liệu mẫu).
   Future<List<CustomerModel>> searchCustomers(String query) async {
     if (kIsWeb) {
       return await _searchCustomersFromFirestore(query);
     }
 
+    if (isPro) {
+      final local = await _localDb.getCustomers();
+      if (local.isEmpty) {
+        await _syncCustomersFromFirestoreToLocal();
+      }
+    }
     return await _localDb.searchCustomers(query);
   }
 
@@ -254,6 +298,28 @@ class CustomerService {
         debugPrint('Error getting customers from Firestore: $e');
       }
       return [];
+    }
+  }
+
+  /// Đồng bộ khách hàng từ Firestore xuống SQLite (PRO, lần đầu sau đăng ký).
+  /// Đồng bộ nhóm khách hàng trước để getCustomerGroupById hoạt động khi áp dụng chiết khấu.
+  Future<void> _syncCustomersFromFirestoreToLocal() async {
+    try {
+      await _syncCustomerGroupsFromFirestoreToLocal();
+      final snapshot = await _customersCollection.get();
+      final customers = snapshot.docs
+          .map((doc) => CustomerModel.fromFirestore(doc.data(), doc.id))
+          .toList();
+      for (final c in customers) {
+        await _localDb.addCustomer(c);
+      }
+      if (kDebugMode && customers.isNotEmpty) {
+        debugPrint('✅ Synced ${customers.length} customers from Firestore to SQLite');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error syncing customers Firestore->SQLite: $e');
+      }
     }
   }
 

@@ -170,7 +170,7 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: selectedBranchId,
+                    initialValue: selectedBranchId,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       labelText: 'Chi nhánh',
@@ -284,7 +284,7 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: selectedBranchId,
+                    initialValue: selectedBranchId,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       labelText: 'Chi nhánh',
@@ -328,23 +328,21 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
                           workingBranchId: branchId,
                         );
                         await _loadPendingStaff();
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Đã điều chuyển nhân viên sang chi nhánh: ${branches.firstWhere((b) => b.id == branchId).name}'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        }
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Đã điều chuyển nhân viên sang chi nhánh: ${branches.firstWhere((b) => b.id == branchId).name}'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
                       } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Lỗi khi điều chuyển nhân viên: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Lỗi khi điều chuyển nhân viên: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
                       }
                     }
                   },

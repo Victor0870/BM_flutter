@@ -40,43 +40,48 @@ class BranchSelectionDialog extends StatelessWidget {
                         style: TextStyle(fontSize: 14),
                       ),
                       const SizedBox(height: 16),
-                      ...branches.map((branch) {
-                        final isSelected = branch.id == selectedBranchId;
-                        return RadioListTile<String>(
-                          title: Row(
-                            children: [
-                              Icon(
-                                Icons.store,
-                                size: 18,
-                                color: isSelected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  branch.name,
-                                  style: TextStyle(
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      RadioGroup<String?>(
+                        groupValue: selectedBranchId,
+                        onChanged: (String? value) {
+                          if (value != null) {
+                            setState(() {
+                              selectedBranchId = value;
+                            });
+                          }
+                        },
+                        child: Column(
+                          children: branches.map((branch) {
+                            final isSelected = branch.id == selectedBranchId;
+                            return RadioListTile<String?>(
+                              title: Row(
+                                children: [
+                                  Icon(
+                                    Icons.store,
+                                    size: 18,
                                     color: isSelected
                                         ? Theme.of(context).colorScheme.primary
-                                        : null,
+                                        : Colors.grey,
                                   ),
-                                ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      branch.name,
+                                      style: TextStyle(
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        color: isSelected
+                                            ? Theme.of(context).colorScheme.primary
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          value: branch.id,
-                          groupValue: selectedBranchId,
-                          onChanged: (String? value) {
-                            if (value != null) {
-                              setState(() {
-                                selectedBranchId = value;
-                              });
-                            }
-                          },
-                        );
-                      }).toList(),
+                              value: branch.id,
+                              toggleable: true,
+                            );
+                          }).toList(),
+                        ),
+                      ),
                     ],
                   ),
           ),

@@ -48,6 +48,8 @@ class SalesProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   String? _lastInvoiceUrl; // Link hóa đơn điện tử vừa tạo
+  /// Tăng mỗi khi checkout/completeTransferPayment thành công — HomeScreen lắng nghe để refresh dashboard.
+  int _checkoutSuccessNotifyCount = 0;
   Timer? _paymentPollingTimer; // Timer để polling payment status
   // ignore: unused_field
   String? _pendingSaleId; // ID của đơn hàng đang chờ thanh toán (chỉ dùng cho PayOS auto polling)
@@ -217,6 +219,8 @@ class SalesProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   String? get lastInvoiceUrl => _lastInvoiceUrl;
+  /// Số lần bán hàng thành công; thay đổi khi checkout/completeTransferPayment thành công.
+  int get checkoutSuccessNotifyCount => _checkoutSuccessNotifyCount;
   
   bool isCartEmptyForTab(int? tabId) {
     final id = tabId ?? _activeTabId;
@@ -572,7 +576,7 @@ class SalesProvider with ChangeNotifier {
     
     // Kiểm tra nếu chiết khấu vượt quá ngưỡng và chưa có phê duyệt
     if (actualDiscountPercent > _discountApprovalThreshold && approvedBy == null) {
-      _errorMessage = 'Chiết khấu vượt quá ${_discountApprovalThreshold}% cần được phê duyệt bởi Admin/Manager';
+      _errorMessage = 'Chiết khấu vượt quá $_discountApprovalThreshold% cần được phê duyệt bởi Admin/Manager';
       notifyListeners();
       return false; // Yêu cầu phê duyệt
     }
@@ -774,19 +778,9 @@ class SalesProvider with ChangeNotifier {
         discountAmount: totalDiscountAmount > 0 ? totalDiscountAmount : null,
       );
 
-      // Lưu đơn hàng (sẽ tự động cập nhật stock và xử lý nợ nếu là đơn nợ)
+      // Lưu đơn hàng (saveSale tự động cập nhật stock khi paymentStatus = COMPLETED; không trừ kho thêm)
       await _salesService!.saveSale(
-        sale,
-        customerService: _customerService,
-      );
-
-      // Trừ kho tự động sau khi lưu hóa đơn thành công (tiền mặt)
-      await _decreaseStockForCartItems(cartItems, sale.branchId);
-      
-      // Đánh dấu đã trừ kho và cập nhật lại hóa đơn
-      final updatedSale = sale.copyWith(isStockUpdated: true);
-      await _salesService!.saveSale(
-        updatedSale,
+        sale.copyWith(isStockUpdated: true),
         customerService: _customerService,
       );
 
@@ -852,6 +846,7 @@ class SalesProvider with ChangeNotifier {
       // Xóa giỏ hàng sau khi thanh toán thành công
       clearCart(tabId: id);
 
+      _checkoutSuccessNotifyCount++;
       _isLoading = false;
       notifyListeners();
       return true;
@@ -1121,8 +1116,7 @@ class SalesProvider with ChangeNotifier {
         return true;
       }
       
-      // Cập nhật stock (vì ban đầu lưu với PENDING nên chưa cập nhật stock)
-      // Tạo sale mới với status COMPLETED để saveSale cập nhật stock
+      // Cập nhật stock: saveSale với paymentStatus COMPLETED sẽ tự động trừ kho (chỉ một lần)
       final completedSale = SaleModel(
         id: sale.id,
         timestamp: sale.timestamp,
@@ -1137,10 +1131,9 @@ class SalesProvider with ChangeNotifier {
         customerAddress: sale.customerAddress,
         notes: sale.notes,
         branchId: sale.branchId,
-        sellerId: sale.sellerId, // Giữ nguyên sellerId
-        sellerName: sale.sellerName, // Giữ nguyên sellerName
-        isStockUpdated: false, // Chưa trừ kho, sẽ trừ ngay sau
-        // Giữ nguyên thông tin chiết khấu
+        sellerId: sale.sellerId,
+        sellerName: sale.sellerName,
+        isStockUpdated: true, // Đánh dấu ngay; saveSale sẽ trừ kho một lần
         subTotal: sale.subTotal,
         orderDiscountValue: sale.orderDiscountValue,
         orderDiscountType: sale.orderDiscountType,
@@ -1149,14 +1142,9 @@ class SalesProvider with ChangeNotifier {
         totalBeforeDiscount: sale.totalBeforeDiscount,
         discountAmount: sale.discountAmount,
       );
-      
-      // Trừ kho tự động sau khi hoàn tất thanh toán chuyển khoản (PayOS hoặc thủ công)
-      await _decreaseStockForCartItems(completedSale.items, completedSale.branchId);
-      
-      // Đánh dấu đã trừ kho và cập nhật lại hóa đơn
-      final updatedSale = completedSale.copyWith(isStockUpdated: true);
+
       await _salesService!.saveSale(
-        updatedSale,
+        completedSale,
         customerService: _customerService,
       );
 
@@ -1190,6 +1178,8 @@ class SalesProvider with ChangeNotifier {
 
       // Dừng polling
       _stopPaymentPolling();
+
+      _checkoutSuccessNotifyCount++;
 
       // Tạo hóa đơn điện tử nếu đã cấu hình
       _lastInvoiceUrl = null;
@@ -1255,60 +1245,6 @@ class SalesProvider with ChangeNotifier {
   void _stopPaymentPolling() {
     _paymentPollingTimer?.cancel();
     _paymentPollingTimer = null;
-  }
-
-  /// Trừ kho tự động cho các sản phẩm trong giỏ hàng
-  /// [items] Danh sách sản phẩm cần trừ kho
-  /// [branchId] ID của chi nhánh cần trừ kho
-  Future<void> _decreaseStockForCartItems(List<SaleItem> items, String branchId) async {
-    if (productProvider == null) {
-      if (kDebugMode) {
-        debugPrint('⚠️ ProductProvider không có sẵn, bỏ qua trừ kho');
-      }
-      return;
-    }
-
-    if (branchId.isEmpty) {
-      if (kDebugMode) {
-        debugPrint('⚠️ BranchId rỗng, bỏ qua trừ kho');
-      }
-      return;
-    }
-
-    // Lấy tên chi nhánh để hiển thị trong log
-    String branchName = 'chi nhánh';
-    if (branchProvider != null && branchProvider!.branches.isNotEmpty) {
-      final branch = branchProvider!.branches.firstWhere(
-        (b) => b.id == branchId,
-        orElse: () => branchProvider!.branches.first,
-      );
-      branchName = branch.name;
-    }
-
-    // Duyệt qua từng sản phẩm và trừ kho
-    for (final item in items) {
-      try {
-        final success = await productProvider!.decreaseStock(
-          item.productId,
-          branchId,
-          item.quantity,
-        );
-
-        if (success) {
-          if (kDebugMode) {
-            debugPrint('✅ Đã trừ ${item.quantity} sản phẩm "${item.productName}" tại $branchName');
-          }
-        } else {
-          if (kDebugMode) {
-            debugPrint('❌ Lỗi khi trừ kho sản phẩm "${item.productName}": ${productProvider!.errorMessage}');
-          }
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('❌ Lỗi khi trừ kho sản phẩm "${item.productName}": $e');
-        }
-      }
-    }
   }
 
   /// Kiểm tra stock của sản phẩm trong giỏ
@@ -1417,6 +1353,19 @@ class SalesProvider with ChangeNotifier {
     }
   }
   
+  /// Lấy đơn hàng theo ID (dùng khi mở chi tiết từ thông báo).
+  Future<SaleModel?> getSaleById(String saleId) async {
+    if (_salesService == null) return null;
+    try {
+      return await _salesService!.getSaleById(saleId);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('SalesProvider getSaleById error: $e');
+      }
+      return null;
+    }
+  }
+
   /// Lưu tất cả giỏ hàng tạm
   Future<void> saveAllDrafts() async {
     for (final tabId in _tabsCart.keys) {

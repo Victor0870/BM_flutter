@@ -28,7 +28,7 @@ class TransferModel {
 
   /// Tính tổng giá trị chuyển (nếu có)
   double get totalValue {
-    return items.fold(0.0, (sum, item) => sum + (item.costPrice * item.quantity));
+    return items.fold(0.0, (total, item) => total + (item.costPrice * item.quantity));
   }
 
   /// Tạo TransferModel từ Firestore document

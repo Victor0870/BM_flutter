@@ -180,10 +180,32 @@ class AppRoutes {
       );
     }
 
-    // Mobile/Web: giữ nguyên MaterialPageRoute với animation mặc định
+    // Mobile/Web: MaterialPageRoute; trên màn hình rộng (>= 600px) vẫn bọc Sidebar để nhất quán với desktop
     return MaterialPageRoute(
       settings: settings,
-      builder: (context) => buildContent(),
+      builder: (context) {
+        final Widget content = buildContent();
+        final double width = MediaQuery.sizeOf(context).width;
+        final bool useSidebar = width >= 600 &&
+            settings.name != sales &&
+            settings.name != saleDetail;
+        if (useSidebar) {
+          final String activeRoute = settings.name ?? '';
+          return Row(
+            children: [
+              AppSidebar(
+                activeRoute: activeRoute,
+                onMenuTap: (route, {String? routeName}) {
+                  if (route.isEmpty || route == activeRoute) return;
+                  Navigator.pushReplacementNamed(context, route);
+                },
+              ),
+              Expanded(child: content),
+            ],
+          );
+        }
+        return content;
+      },
     );
   }
 }

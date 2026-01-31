@@ -10,7 +10,8 @@ import 'product_service.dart';
 class TransferService {
   final bool isPro;
   final String userId;
-  // final LocalDbService _localDb = LocalDbService(); // TODO: Sử dụng khi có transfers table trong SQLite
+  // ignore: todo
+  // final LocalDbService _localDb = LocalDbService(); // Sử dụng khi có transfers table trong SQLite
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ProductService _productService;
 
@@ -138,7 +139,8 @@ class TransferService {
   /// Lưu vào SQLite
   Future<void> _saveTransferToLocal(TransferModel transfer) async {
     try {
-      // TODO: Thêm method vào LocalDbService để lưu transfers
+      // ignore: todo
+      // Thêm method vào LocalDbService để lưu transfers
       // Tạm thời bỏ qua vì chưa có transfers table trong SQLite
       // Có thể thêm sau khi cần thiết
       if (kDebugMode) {

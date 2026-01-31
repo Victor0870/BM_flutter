@@ -108,31 +108,30 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                   success = await productProvider.updateCategory(categoryToSave);
                 }
 
-                if (mounted) {
-                  Navigator.pop(context);
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          category == null
-                              ? 'Thêm nhóm hàng thành công!'
-                              : 'Cập nhật nhóm hàng thành công!',
-                        ),
-                        backgroundColor: Colors.green,
+                if (!context.mounted) return;
+                Navigator.pop(context);
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        category == null
+                            ? 'Thêm nhóm hàng thành công!'
+                            : 'Cập nhật nhóm hàng thành công!',
                       ),
-                    );
-                    await _refreshCategories();
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          productProvider.categoryErrorMessage ??
-                              'Có lỗi xảy ra',
-                        ),
-                        backgroundColor: Colors.red,
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  await _refreshCategories();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        productProvider.categoryErrorMessage ??
+                            'Có lỗi xảy ra',
                       ),
-                    );
-                  }
+                      backgroundColor: Colors.red,
+                    ),
+                  );
                 }
               }
             },
@@ -169,6 +168,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
     if (confirm == true && mounted) {
       final productProvider = context.read<ProductProvider>();
       final success = await productProvider.deleteCategory(category.id);
+      if (!mounted) return;
 
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -67,11 +66,13 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
   }
 
   Future<void> _exportToExcel() async {
+    if (!context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
     final provider = context.read<SalesReturnProvider>();
     final salesReturns = provider.salesReturns;
     
     if (salesReturns.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(
           content: Text('Không có dữ liệu để xuất Excel'),
           backgroundColor: Colors.orange,
@@ -130,13 +131,14 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
         // Web: Download file
         final bytes = excel.save();
         if (bytes != null) {
-          // Sử dụng package downloader hoặc show dialog để user download
-          ScaffoldMessenger.of(context).showSnackBar(
+          if (!context.mounted) return;
+          messenger.showSnackBar(
             SnackBar(
               content: Text('File Excel đã được tạo: $fileName'),
               action: SnackBarAction(
                 label: 'Tải về',
                 onPressed: () {
+                  // ignore: todo
                   // TODO: Implement download for web
                 },
               ),
@@ -156,8 +158,8 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
           if (bytes != null) {
             await file.writeAsBytes(bytes);
             
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
+            if (context.mounted) {
+              messenger.showSnackBar(
                 SnackBar(
                   content: Text('Đã xuất Excel: $fileName'),
                   backgroundColor: Colors.green,
@@ -168,8 +170,8 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (context.mounted) {
+        messenger.showSnackBar(
           SnackBar(
             content: Text('Lỗi khi xuất Excel: $e'),
             backgroundColor: Colors.red,
@@ -779,7 +781,7 @@ class _SalesReturnDataTable extends StatelessWidget {
         }
 
         return DataTable(
-          headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
+          headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
           columnSpacing: 16,
           columns: const [
             DataColumn(

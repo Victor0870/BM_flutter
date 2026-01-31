@@ -61,13 +61,9 @@ class ProductService {
     );
   }
 
-  /// Đồng bộ danh sách sản phẩm vào SQLite (dự phòng)
-  Future<void> _syncProductsToLocal(List<ProductModel> products) async {
-    // Không sync trên web
-    if (kIsWeb) {
-      return;
-    }
-
+  /// Đồng bộ danh sách sản phẩm vào SQLite (dự phòng). Public để ProductProvider gọi khi nhận dữ liệu real-time.
+  Future<void> syncProductsToLocal(List<ProductModel> products) async {
+    if (kIsWeb) return;
     try {
       for (final product in products) {
         await _localDb.addProduct(product);
@@ -76,8 +72,21 @@ class ProductService {
       if (kDebugMode) {
         debugPrint('Error syncing products to local: $e');
       }
-      // Không throw, chỉ log lỗi
     }
+  }
+
+  /// Nội bộ: đồng bộ vào SQLite (gọi từ syncProductsToLocal và các chỗ khác trong service).
+  Future<void> _syncProductsToLocal(List<ProductModel> products) async {
+    return syncProductsToLocal(products);
+  }
+
+  /// Lấy sản phẩm từ Firestore (một lần) — dùng cho light sync PRO.
+  /// Trả về danh sách từ Cloud; không ghi SQLite (caller gọi syncProductsToLocal nếu cần).
+  Future<List<ProductModel>> fetchProductsFromCloud({
+    bool includeInactive = false,
+  }) async {
+    if (!isPro && !kIsWeb) return [];
+    return _getProductsFromFirestore(includeInactive: includeInactive);
   }
 
   /// Lấy sản phẩm từ Firestore
@@ -442,7 +451,7 @@ class ProductService {
   }) async {
     try {
       final history = StockHistoryModel(
-        id: DateTime.now().millisecondsSinceEpoch.toString() + '_' + productId + '_' + branchId,
+        id: '${DateTime.now().millisecondsSinceEpoch}_${productId}_$branchId',
         productId: productId,
         branchId: branchId,
         type: type,
@@ -475,8 +484,8 @@ class ProductService {
     try {
       final docRef = _productsCollection.doc(productId);
       
-      // Sử dụng FieldValue.increment để đảm bảo tính toàn vẹn dữ liệu
-      // Cú pháp: 'branchStock.branchId' để cập nhật nested field
+      // FieldValue.increment: tránh race condition khi nhiều thiết bị cập nhật cùng lúc.
+      // FieldValue.serverTimestamp(): thiết bị khác đang listen sẽ nhận snapshot mới ngay, tránh xung đột dữ liệu cũ.
       await docRef.update({
         'branchStock.$branchId': FieldValue.increment(quantityChange),
         'updatedAt': FieldValue.serverTimestamp(),

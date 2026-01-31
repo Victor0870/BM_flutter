@@ -49,13 +49,6 @@ class _CustomerManagementScreenState extends State<CustomerManagementScreen> {
         title: const Text('Quản lý khách hàng'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.home),
-            onPressed: () {
-              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-            },
-            tooltip: 'Về trang chủ',
-          ),
-          IconButton(
             icon: const Icon(Icons.group),
             onPressed: () {
               Navigator.pushNamed(context, AppRoutes.customerGroupManagement);
@@ -103,7 +96,7 @@ class _CustomerManagementScreenState extends State<CustomerManagementScreen> {
                       const SizedBox(height: 12),
                       // Filter theo nhóm
                       DropdownButtonFormField<String?>(
-                        value: _selectedGroupId,
+                        initialValue: _selectedGroupId,
                         decoration: InputDecoration(
                           labelText: 'Lọc theo nhóm',
                           prefixIcon: const Icon(Icons.filter_list),

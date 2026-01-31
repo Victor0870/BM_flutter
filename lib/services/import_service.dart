@@ -85,7 +85,7 @@ class ImportService {
           );
 
           final product = ProductModel(
-            id: DateTime.now().millisecondsSinceEpoch.toString() + '_$i',
+            id: '${DateTime.now().millisecondsSinceEpoch}_$i',
             name: name,
             units: [unitConversion],
             branchPrices: {'default': price},

@@ -446,7 +446,7 @@ class _AppSidebarState extends State<AppSidebar> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF0F172A).withOpacity(0.1) : Colors.transparent,
+          color: isActive ? const Color(0xFF0F172A).withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(

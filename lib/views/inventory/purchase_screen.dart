@@ -10,6 +10,7 @@ import '../../models/purchase_model.dart';
 import '../../models/branch_model.dart';
 import '../../models/unit_conversion.dart';
 import '../../widgets/responsive_container.dart';
+import '../../widgets/ad_banner_widget.dart';
 
 /// Màn hình nhập kho
 class PurchaseScreen extends StatefulWidget {
@@ -269,6 +270,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           // Reload products để cập nhật stock mới
           final productProvider = context.read<ProductProvider>();
           await productProvider.loadProducts();
+          if (!mounted) return;
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -311,13 +313,14 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       appBar: AppBar(
         title: const Text('Nhập kho'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.home),
-            onPressed: () {
-              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-            },
-            tooltip: 'Về trang chủ',
-          ),
+          if (!isMobile(context))
+            IconButton(
+              icon: const Icon(Icons.home),
+              onPressed: () {
+                Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+              },
+              tooltip: 'Về trang chủ',
+            ),
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () {
@@ -327,18 +330,25 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           ),
         ],
       ),
-      body: ResponsiveContainer(
-        padding: EdgeInsets.zero,
-        child: Column(
-          children: [
-            // Thanh tìm kiếm mã vạch và nhà cung cấp
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.grey[100],
+      body: Column(
+        children: [
+          Expanded(
+            child: ResponsiveContainer(
+              maxWidth: 800,
+              padding: EdgeInsets.zero,
               child: Column(
                 children: [
-                  // Nhà cung cấp
-                  TextField(
+                  // Thanh tìm kiếm mã vạch và nhà cung cấp (responsive)
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isNarrow = constraints.maxWidth < kBreakpointMobile;
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        color: Colors.grey[100],
+                        child: Column(
+                          children: [
+                            // Nhà cung cấp
+                            TextField(
                     controller: _supplierNameController,
                     decoration: InputDecoration(
                       labelText: 'Nhà cung cấp *',
@@ -364,9 +374,9 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                         final selectedBranchId = authProvider.selectedBranchId;
 
                         return SizedBox(
-                          width: 320,
+                          width: isNarrow ? double.infinity : 320,
                           child: DropdownButtonFormField<String?>(
-                            value: selectedBranchId,
+                            initialValue: selectedBranchId,
                             decoration: InputDecoration(
                               labelText: 'Chi nhánh nhập *',
                               prefixIcon: const Icon(Icons.store),
@@ -393,46 +403,80 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // Tìm kiếm mã vạch
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _barcodeController,
-                          decoration: InputDecoration(
-                            hintText: 'Nhập hoặc quét mã vạch',
-                            prefixIcon: const Icon(Icons.qr_code_scanner),
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.camera_alt),
-                              onPressed: _scanBarcode,
-                              tooltip: 'Quét mã vạch',
+                  // Tìm kiếm mã vạch (trên mobile xuống dòng)
+                  isNarrow
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: _barcodeController,
+                              decoration: InputDecoration(
+                                hintText: 'Nhập hoặc quét mã vạch',
+                                prefixIcon: const Icon(Icons.qr_code_scanner),
+                                suffixIcon: IconButton(
+                                  icon: const Icon(Icons.camera_alt),
+                                  onPressed: _scanBarcode,
+                                  tooltip: 'Quét mã vạch',
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onSubmitted: _searchAndAddProduct,
                             ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
+                            const SizedBox(height: 8),
+                            IconButton(
+                              icon: const Icon(Icons.list),
+                              onPressed: _showProductSelection,
+                              tooltip: 'Chọn sản phẩm',
+                              style: IconButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.all(16),
+                              ),
                             ),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _barcodeController,
+                                decoration: InputDecoration(
+                                  hintText: 'Nhập hoặc quét mã vạch',
+                                  prefixIcon: const Icon(Icons.qr_code_scanner),
+                                  suffixIcon: IconButton(
+                                    icon: const Icon(Icons.camera_alt),
+                                    onPressed: _scanBarcode,
+                                    tooltip: 'Quét mã vạch',
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onSubmitted: _searchAndAddProduct,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.list),
+                              onPressed: _showProductSelection,
+                              tooltip: 'Chọn sản phẩm',
+                              style: IconButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.all(16),
+                              ),
+                            ),
+                          ],
+                        ),
+                            ],
                           ),
-                          onSubmitted: _searchAndAddProduct,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.list),
-                        onPressed: _showProductSelection,
-                        tooltip: 'Chọn sản phẩm',
-                        style: IconButton.styleFrom(
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.all(16),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-          // Giỏ hàng nhập kho
-          Expanded(
+                        );
+                      },
+                    ),
+                  // Giỏ hàng nhập kho
+                  Expanded(
             child: Consumer<PurchaseProvider>(
               builder: (context, purchaseProvider, child) {
                 if (purchaseProvider.isCartEmpty) {
@@ -527,7 +571,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                           color: Colors.white,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
+                              color: Colors.black.withValues(alpha: 0.1),
                               blurRadius: 4,
                               offset: const Offset(0, -2),
                             ),
@@ -601,6 +645,13 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           ),
         ],
         ),
+        ),
+      ),
+      const SafeArea(
+        top: false,
+        child: AdBannerWidget(),
+      ),
+      ],
       ),
     );
   }
@@ -1020,7 +1071,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               padding: const EdgeInsets.all(16),
               margin: const EdgeInsets.symmetric(horizontal: 32),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
+                color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Text(

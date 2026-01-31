@@ -94,6 +94,9 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # App icon generator
+  flutter_launcher_icons: ^0.14.4
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -135,3 +138,14 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Cấu hình flutter_launcher_icons: icon ứng dụng cho Android & iOS
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/Icon_App_Bizmate.png"
+  # Android adaptive icon (foreground + background)
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/Icon_App_Bizmate.png"
+  # iOS: loại bỏ alpha để đúng yêu cầu App Store
+  remove_alpha_ios: true

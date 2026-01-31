@@ -10,6 +10,7 @@ import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../services/sales_service.dart';
 import '../../services/product_service.dart';
+import '../../widgets/responsive_container.dart';
 import 'sale_detail_screen.dart';
 
 /// Màn hình hiển thị lịch sử đơn hàng đã bán với thiết kế mới
@@ -161,17 +162,14 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
       builder: (context, constraints) {
         final screenWidth = constraints.maxWidth;
         
-        // Xác định maxWidth dựa trên kích thước màn hình
+        // Xác định maxWidth theo breakpoint chuẩn (responsive_container.dart)
         double maxWidth;
-        if (screenWidth < 600) {
-          // Mobile: full width
+        if (screenWidth < kBreakpointMobile) {
           maxWidth = screenWidth;
-        } else if (screenWidth < 1200) {
-          // Tablet: maxWidth = 900
+        } else if (screenWidth < kBreakpointTablet) {
           maxWidth = 900;
         } else {
-          // Desktop: maxWidth = 1200
-          maxWidth = 1200;
+          maxWidth = kBreakpointTablet;
         }
 
         return Center(
@@ -230,6 +228,50 @@ class _HeaderSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onMobile = isMobile(context);
+    final buttons = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        OutlinedButton.icon(
+          onPressed: onRefresh,
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('Làm mới'),
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton.icon(
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Tính năng đang được phát triển')),
+            );
+          },
+          icon: const Icon(Icons.download, size: 18),
+          label: const Text('Xuất Excel'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue.shade600,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+
+    if (onMobile) {
+      // Mobile: AppBar đã có title "Quản lý đơn hàng", chỉ hiển thị subtitle + nút (nút cuộn ngang nếu chật)
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Theo dõi và xử lý đơn hàng.',
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: buttons,
+          ),
+        ],
+      );
+    }
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -254,29 +296,7 @@ class _HeaderSection extends StatelessWidget {
             ),
           ],
         ),
-        Row(
-          children: [
-            OutlinedButton.icon(
-              onPressed: onRefresh,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Làm mới'),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Tính năng đang được phát triển')),
-                );
-              },
-              icon: const Icon(Icons.download, size: 18),
-              label: const Text('Xuất Excel'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade600,
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
-        ),
+        buttons,
       ],
     );
   }
@@ -295,51 +315,69 @@ class _SummaryCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const cardMinWidth = 165.0;
+    final cards = [
+      _StatCard(
+        icon: Icons.access_time,
+        iconColor: const Color(0xFFF59E0B),
+        iconBg: const Color(0xFFFFFBEB),
+        label: 'Chờ xử lý',
+        value: (isLoading || errorMessage != null) ? '...' : (stats['pending'] ?? 0).toString(),
+        suffix: 'đơn',
+      ),
+      _StatCard(
+        icon: Icons.local_shipping,
+        iconColor: const Color(0xFF2563EB),
+        iconBg: const Color(0xFFE0F2FE),
+        label: 'Đang giao',
+        value: (isLoading || errorMessage != null) ? '...' : (stats['delivering'] ?? 0).toString(),
+        suffix: 'đơn',
+      ),
+      _StatCard(
+        icon: Icons.check_circle,
+        iconColor: const Color(0xFF059669),
+        iconBg: const Color(0xFFD1FAE5),
+        label: 'Đã hoàn thành',
+        value: (isLoading || errorMessage != null) ? '...' : (stats['completed'] ?? 0).toString(),
+        suffix: 'đơn',
+      ),
+      _StatCard(
+        icon: Icons.cancel,
+        iconColor: const Color(0xFF64748B),
+        iconBg: const Color(0xFFF1F5F9),
+        label: 'Đã hủy',
+        value: (isLoading || errorMessage != null) ? '...' : (stats['cancelled'] ?? 0).toString(),
+        suffix: 'đơn',
+      ),
+    ];
+
+    if (isMobile(context)) {
+      // Mobile: cuộn ngang để mỗi card đủ rộng hiển thị đủ nội dung
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (int i = 0; i < cards.length; i++) ...[
+              if (i > 0) const SizedBox(width: 12),
+              SizedBox(
+                width: cardMinWidth,
+                child: cards[i],
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     return Row(
       children: [
-        Expanded(
-          child: _StatCard(
-            icon: Icons.access_time,
-            iconColor: const Color(0xFFF59E0B),
-            iconBg: const Color(0xFFFFFBEB),
-            label: 'Chờ xử lý',
-            value: (isLoading || errorMessage != null) ? '...' : (stats['pending'] ?? 0).toString(),
-            suffix: 'đơn',
-          ),
-        ),
+        Expanded(child: cards[0]),
         const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.local_shipping,
-            iconColor: const Color(0xFF2563EB),
-            iconBg: const Color(0xFFE0F2FE),
-            label: 'Đang giao',
-            value: (isLoading || errorMessage != null) ? '...' : (stats['delivering'] ?? 0).toString(),
-            suffix: 'đơn',
-          ),
-        ),
+        Expanded(child: cards[1]),
         const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.check_circle,
-            iconColor: const Color(0xFF059669),
-            iconBg: const Color(0xFFD1FAE5),
-            label: 'Đã hoàn thành',
-            value: (isLoading || errorMessage != null) ? '...' : (stats['completed'] ?? 0).toString(),
-            suffix: 'đơn',
-          ),
-        ),
+        Expanded(child: cards[2]),
         const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.cancel,
-            iconColor: const Color(0xFF64748B),
-            iconBg: const Color(0xFFF1F5F9),
-            label: 'Đã hủy',
-            value: (isLoading || errorMessage != null) ? '...' : (stats['cancelled'] ?? 0).toString(),
-            suffix: 'đơn',
-          ),
-        ),
+        Expanded(child: cards[3]),
       ],
     );
   }
@@ -439,6 +477,16 @@ class _SalesTable extends StatelessWidget {
     required this.onSearchChanged,
     required this.onRefresh,
   });
+
+  void _openSaleDetail(BuildContext context, SaleModel sale, {bool fullScreen = false}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: fullScreen,
+        builder: (_) => SaleDetailScreen(sale: sale),
+      ),
+    );
+  }
 
   String _getOrderId(String id) {
     final shortId = id.length > 8 ? id.substring(0, 8).toUpperCase() : id.toUpperCase();
@@ -547,9 +595,15 @@ class _SalesTable extends StatelessWidget {
                           onRefresh: onRefresh,
                           child: LayoutBuilder(
                             builder: (context, constraints) {
-                              // Sử dụng constraints.maxWidth để đảm bảo bảng đạt đúng maxWidth
+                              final isMobile = constraints.maxWidth < kBreakpointMobile;
+                              if (isMobile) {
+                                return _SalesListMobile(
+                                  sales: sales,
+                                  getOrderId: _getOrderId,
+                                  onTapSale: (sale) => _openSaleDetail(context, sale, fullScreen: true),
+                                );
+                              }
                               final tableWidth = constraints.maxWidth;
-                              
                               return SingleChildScrollView(
                                 scrollDirection: Axis.horizontal,
                                 child: SizedBox(
@@ -573,11 +627,11 @@ class _SalesTable extends StatelessWidget {
                                       return DataTable(
                                         showCheckboxColumn: false,
                                         headingRowColor:
-                                            MaterialStateProperty.all(Colors.grey.shade50),
+                                            WidgetStateProperty.all(Colors.grey.shade50),
                                         columnSpacing: 16,
                                         columns: [
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 80,
                                               child: const Text(
                                                 'NGÀY BÁN',
@@ -592,7 +646,7 @@ class _SalesTable extends StatelessWidget {
                                             ),
                                           ),
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 110,
                                               child: const Text(
                                                 'MÃ ĐƠN',
@@ -607,7 +661,7 @@ class _SalesTable extends StatelessWidget {
                                             ),
                                           ),
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 120,
                                               child: const Text(
                                                 'KHÁCH HÀNG',
@@ -622,7 +676,7 @@ class _SalesTable extends StatelessWidget {
                                             ),
                                           ),
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 110,
                                               child: const Text(
                                                 'TỔNG CỘNG',
@@ -638,7 +692,7 @@ class _SalesTable extends StatelessWidget {
                                             numeric: true,
                                           ),
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 100,
                                               child: const Text(
                                                 'NHÂN VIÊN',
@@ -653,7 +707,7 @@ class _SalesTable extends StatelessWidget {
                                             ),
                                           ),
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 110,
                                               child: const Text(
                                                 'CHI NHÁNH',
@@ -668,7 +722,7 @@ class _SalesTable extends StatelessWidget {
                                             ),
                                           ),
                                           DataColumn(
-                                            label: Container(
+                                            label: SizedBox(
                                               width: 120,
                                               child: const Text(
                                                 'TRẠNG THÁI',
@@ -695,12 +749,7 @@ class _SalesTable extends StatelessWidget {
 
                                             return DataRow(
                                               onSelectChanged: (_) {
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (_) => SaleDetailScreen(sale: sale),
-                                                  ),
-                                                );
+                                                _openSaleDetail(context, sale, fullScreen: false);
                                               },
                                               cells: [
                                                 DataCell(
@@ -789,10 +838,10 @@ class _SalesTable extends StatelessWidget {
                                                         vertical: 4,
                                                       ),
                                                       decoration: BoxDecoration(
-                                                        color: statusColor.withOpacity(0.08),
+                                                        color: statusColor.withValues(alpha: 0.08),
                                                         borderRadius: BorderRadius.circular(999),
                                                         border: Border.all(
-                                                          color: statusColor.withOpacity(0.3),
+                                                          color: statusColor.withValues(alpha: 0.3),
                                                         ),
                                                       ),
                                                       child: Text(
@@ -813,12 +862,7 @@ class _SalesTable extends StatelessWidget {
                                                     child: IconButton(
                                                       icon: const Icon(Icons.more_horiz, size: 18, color: Color(0xFFCBD5E1)),
                                                       onPressed: () {
-                                                        Navigator.push(
-                                                          context,
-                                                          MaterialPageRoute(
-                                                            builder: (_) => SaleDetailScreen(sale: sale),
-                                                          ),
-                                                        );
+                                                        _openSaleDetail(context, sale, fullScreen: false);
                                                       },
                                                     ),
                                                   ),
@@ -836,6 +880,63 @@ class _SalesTable extends StatelessWidget {
                         ),
         ),
       ],
+    );
+  }
+}
+
+/// Danh sách đơn hàng dạng ListTile cho Mobile: mã đơn, ngày + khách hàng (subtitle), tổng tiền (trailing).
+class _SalesListMobile extends StatelessWidget {
+  final List<SaleModel> sales;
+  final String Function(String id) getOrderId;
+  final void Function(SaleModel sale) onTapSale;
+
+  const _SalesListMobile({
+    required this.sales,
+    required this.getOrderId,
+    required this.onTapSale,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: sales.length,
+      itemBuilder: (context, index) {
+        final sale = sales[index];
+        final orderId = getOrderId(sale.id);
+        final dateStr = DateFormat('dd/MM/yyyy HH:mm').format(sale.timestamp);
+        final customerName = sale.customerName ?? 'Khách lẻ';
+
+        return ListTile(
+          title: Text(
+            orderId,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF3B82F6),
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            '$dateStr\n$customerName',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade700,
+              height: 1.35,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Text(
+            NumberFormat.currency(locale: 'vi_VN', symbol: '₫').format(sale.totalAmount),
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          onTap: () => onTapSale(sale),
+        );
+      },
     );
   }
 }

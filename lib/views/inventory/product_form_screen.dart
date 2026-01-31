@@ -7,6 +7,8 @@ import '../../models/product_model.dart';
 import '../../models/unit_conversion.dart';
 import '../../models/category_model.dart';
 import '../../widgets/responsive_container.dart';
+import '../../widgets/ad_banner_widget.dart';
+
 
 /// Màn hình thêm/sửa sản phẩm
 class ProductFormScreen extends StatefulWidget {
@@ -564,28 +566,26 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 );
 
                 final success = await productProvider.addCategory(newCategory);
+                if (!context.mounted) return;
+                Navigator.pop(context);
 
-                if (mounted) {
-                  Navigator.pop(context);
-                  
-                  if (success) {
-                    setState(() {
-                      _selectedCategoryId = newCategory.id;
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Đã tạo và chọn nhóm hàng mới!'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(productProvider.categoryErrorMessage ?? 'Có lỗi xảy ra'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
+                if (success) {
+                  setState(() {
+                    _selectedCategoryId = newCategory.id;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Đã tạo và chọn nhóm hàng mới!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(productProvider.categoryErrorMessage ?? 'Có lỗi xảy ra'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
                 }
               }
             },
@@ -720,17 +720,21 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.product != null;
+    final useMobileLayout = isMobile(context);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(isEdit ? 'Sửa sản phẩm' : 'Thêm sản phẩm mới'),
       ),
-      body: ResponsiveContainer(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
+      body: Column(
+        children: [
+          Expanded(
+            child: ResponsiveContainer(
+              padding: const EdgeInsets.all(16),
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  children: [
             // Tên sản phẩm
             TextFormField(
               controller: _nameController,
@@ -898,7 +902,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: _selectedCategoryId,
+                        initialValue: _selectedCategoryId,
                         decoration: const InputDecoration(
                           labelText: 'Nhóm hàng',
                           hintText: 'Chọn nhóm hàng',
@@ -1268,57 +1272,178 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ],
             const SizedBox(height: 24),
 
-            // Nút Lưu
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isLoading ? null : _saveProductAndContinue,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+            // Nút Lưu (Desktop: inline; Mobile: hiển thị ở bottom bar)
+            if (!useMobileLayout)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isLoading ? null : _saveProductAndContinue,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                        : Center(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: const Text(
+                                'Lưu và thêm tiếp',
+                                style: TextStyle(fontSize: 16),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                  ),
+                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _saveProduct,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Center(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  isEdit ? 'Cập nhật' : 'Thêm sản phẩm',
+                                  style: const TextStyle(fontSize: 16),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
                     ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
+                  ),
+                ],
+              ),
+            if (useMobileLayout) SizedBox(height: 80 + MediaQuery.of(context).padding.bottom),
+          ],
+                ),
+              ),
+            ),
+          ),
+          if (useMobileLayout) _buildProductFormBottomBar(isEdit),
+          const SafeArea(
+            top: false,
+            child: AdBannerWidget(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Thanh nút Lưu/Hủy cố định ở đáy màn hình (Mobile).
+  Widget _buildProductFormBottomBar(bool isEdit) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        12,
+        16,
+        16 + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _isLoading ? null : () => Navigator.pop(context),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Hủy'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _isLoading ? null : _saveProductAndContinue,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Center(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: const Text(
                             'Lưu và thêm tiếp',
-                            style: TextStyle(fontSize: 16),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _saveProduct,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(
-                            isEdit ? 'Cập nhật' : 'Thêm sản phẩm',
-                            style: const TextStyle(fontSize: 16),
-                          ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _saveProduct,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-              ],
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Center(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            isEdit ? 'Cập nhật' : 'Thêm sản phẩm',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+              ),
             ),
           ],
-          ),
         ),
       ),
     );
@@ -1383,7 +1508,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               padding: const EdgeInsets.all(16),
               margin: const EdgeInsets.symmetric(horizontal: 32),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
+                color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Text(

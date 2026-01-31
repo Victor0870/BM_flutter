@@ -2,17 +2,46 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../widgets/ad_banner_widget.dart';
 import '../widgets/app_sidebar.dart';
 import '../widgets/branch_selector_widget.dart';
 import '../controllers/auth_provider.dart';
+import '../controllers/notification_provider.dart';
 import '../core/routes.dart';
 import 'home_screen.dart';
+import 'notifications/notification_screen.dart';
 import 'sales/sales_screen.dart';
 import 'settings/shop_settings_screen.dart';
 
+/// Route chứa các tab chính (Trang chủ, Bán hàng, ...) dùng cho nested Navigator trên mobile.
+const String _kMainTabsRoute = '/main-tabs';
+
+/// Observer theo dõi stack nested Navigator để ẩn AppBar khi đang xem màn con.
+class _NestedNavObserver extends NavigatorObserver {
+  final VoidCallback onStackChanged;
+
+  _NestedNavObserver({required this.onStackChanged});
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPush(route, previousRoute);
+    onStackChanged();
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPop(route, previousRoute);
+    onStackChanged();
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didRemove(route, previousRoute);
+    onStackChanged();
+  }
+}
+
 /// MainScaffold với BottomNavigationBar và IndexedStack
-/// Quản lý navigation chính của ứng dụng
+/// Trên mobile: nested Navigator để BottomNav luôn hiện khi đi sâu vào các màn (Quản lý kho, Hóa đơn, ...).
 class MainScaffold extends StatefulWidget {
   const MainScaffold({super.key});
 
@@ -23,6 +52,27 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int _currentIndex = 0;
 
+  final GlobalKey<NavigatorState> _nestedNavKey = GlobalKey<NavigatorState>();
+  bool _hasPushedRoute = false;
+
+  late final NavigatorObserver _nestedNavObserver;
+
+  @override
+  void initState() {
+    super.initState();
+    _nestedNavObserver = _NestedNavObserver(onStackChanged: _onNestedStackChanged);
+  }
+
+  void _onNestedStackChanged() {
+    final state = _nestedNavKey.currentState;
+    final canPop = state != null && state.canPop();
+    if (_hasPushedRoute != canPop) {
+      setState(() {
+        _hasPushedRoute = canPop;
+      });
+    }
+  }
+
   // Danh sách các màn hình chính
   final List<Widget> _screens = [
     const HomeScreen(),
@@ -32,49 +82,47 @@ class _MainScaffoldState extends State<MainScaffold> {
       title: 'Báo cáo',
       message: 'Tính năng đang phát triển',
     ),
-    // Thông báo - placeholder
-    const _PlaceholderScreen(
-      title: 'Thông báo',
-      message: 'Tính năng đang phát triển',
-    ),
+    const NotificationScreen(),
     const ShopSettingsScreen(),
   ];
 
   void _onTabTapped(int index) {
-    // Xử lý các tab đặc biệt
     if (index == 2) {
-      // Báo cáo
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Tính năng đang phát triển'),
           duration: Duration(seconds: 2),
         ),
       );
-      // Vẫn chuyển tab để hiển thị placeholder screen
-      setState(() {
-        _currentIndex = index;
-      });
+      _switchToTab(index);
       return;
     }
-    
-    if (index == 3) {
-      // Thông báo
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tính năng đang phát triển'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      // Vẫn chuyển tab để hiển thị placeholder screen
-      setState(() {
-        _currentIndex = index;
-      });
-      return;
-    }
+    // index 3 = Thông báo: chuyển sang NotificationScreen (không SnackBar)
+    _switchToTab(index);
+  }
 
+  /// Chuyển tab: trên mobile pop nested stack về /main-tabs rồi đổi index.
+  void _switchToTab(int index) {
+    final nav = _nestedNavKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.popUntil((route) => route.settings.name == _kMainTabsRoute);
+    }
     setState(() {
       _currentIndex = index;
     });
+  }
+
+  Route<dynamic>? _nestedOnGenerateRoute(RouteSettings settings) {
+    if (settings.name == _kMainTabsRoute || settings.name == '/' || settings.name == null || settings.name!.isEmpty) {
+      return MaterialPageRoute<void>(
+        settings: const RouteSettings(name: _kMainTabsRoute),
+        builder: (_) => IndexedStack(
+          index: _currentIndex,
+          children: _screens,
+        ),
+      );
+    }
+    return AppRoutes.generateRoute(settings);
   }
 
   String _getCurrentRoute() {
@@ -107,37 +155,56 @@ class _MainScaffoldState extends State<MainScaffold> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    
-    // Detect platform
-    final bool isAndroid = !kIsWeb && Platform.isAndroid;
-    final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    
-    // Ẩn AppBar khi ở màn hình Bán hàng (index 1) hoặc HomeScreen (index 0) để tránh trùng lặp
-    // SalesScreen và HomeScreen đều có AppBar/sidebar riêng
-    final bool showAppBar = _currentIndex != 0 && _currentIndex != 1 && !isDesktop;
-    
-    // Chỉ hiển thị bottom bar trên Android
-    // Trên Windows/Desktop sẽ dùng sidebar thay thế
-    final bool showBottomBar = isAndroid;
-    
-    Widget body = IndexedStack(
-      index: _currentIndex,
-      children: _screens,
-    );
 
-    // Wrap với sidebar trên desktop, trừ màn hình Bán hàng (POS) để POS full-screen
-    if (isDesktop && _currentIndex != 1) {
-      body = Row(
-        children: [
-          AppSidebar(
-            activeRoute: _getCurrentRoute(),
-            onMenuTap: _handleSidebarNavigation,
-          ),
-          Expanded(child: body),
-        ],
-      );
+    final bool isAndroid = !kIsWeb && Platform.isAndroid;
+    final bool isIOS = !kIsWeb && Platform.isIOS;
+    final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+    final bool isMobile = isAndroid || isIOS;
+
+    final bool showBottomBar = isMobile;
+    final bool useNestedNavigator = showBottomBar;
+
+    bool showAppBar = _currentIndex != 0 && _currentIndex != 1 && !isDesktop;
+    if (useNestedNavigator && _hasPushedRoute) {
+      showAppBar = false;
     }
-    
+
+    Widget body;
+    if (useNestedNavigator) {
+      body = PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) return;
+          final nav = _nestedNavKey.currentState;
+          if (nav != null && nav.canPop()) {
+            nav.pop();
+          }
+        },
+        child: Navigator(
+          key: _nestedNavKey,
+          initialRoute: _kMainTabsRoute,
+          onGenerateRoute: _nestedOnGenerateRoute,
+          observers: [_nestedNavObserver],
+        ),
+      );
+    } else {
+      body = IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      );
+      if (isDesktop && _currentIndex != 1) {
+        body = Row(
+          children: [
+            AppSidebar(
+              activeRoute: _getCurrentRoute(),
+              onMenuTap: _handleSidebarNavigation,
+            ),
+            Expanded(child: body),
+          ],
+        );
+      }
+    }
+
     return Scaffold(
       appBar: showAppBar ? AppBar(
         title: const Text('BizMate POS'),
@@ -160,43 +227,49 @@ class _MainScaffoldState extends State<MainScaffold> {
         ],
       ) : null,
       body: body,
-      bottomNavigationBar: showBottomBar ? Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // AdBannerWidget phía trên BottomNavigationBar
-          const AdBannerWidget(),
-          // BottomNavigationBar
-          BottomNavigationBar(
+      bottomNavigationBar: showBottomBar ? BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
             currentIndex: _currentIndex.clamp(0, 4), // Đảm bảo index hợp lệ
             onTap: _onTabTapped,
             selectedItemColor: Theme.of(context).colorScheme.primary,
             unselectedItemColor: Colors.grey,
-            items: const [
-              BottomNavigationBarItem(
+            items: [
+              const BottomNavigationBarItem(
                 icon: Icon(Icons.home),
                 label: 'Trang chủ',
               ),
-              BottomNavigationBarItem(
+              const BottomNavigationBarItem(
                 icon: Icon(Icons.point_of_sale),
                 label: 'Bán hàng',
               ),
-              BottomNavigationBarItem(
+              const BottomNavigationBarItem(
                 icon: Icon(Icons.bar_chart),
                 label: 'Báo cáo',
               ),
               BottomNavigationBarItem(
-                icon: Icon(Icons.notifications),
+                icon: Consumer<NotificationProvider>(
+                  builder: (context, notificationProvider, _) {
+                    final count = notificationProvider.unreadCount;
+                    if (count > 0) {
+                      return Badge(
+                        label: Text(
+                          count > 99 ? '99+' : '$count',
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                        child: const Icon(Icons.notifications),
+                      );
+                    }
+                    return const Icon(Icons.notifications);
+                  },
+                ),
                 label: 'Thông báo',
               ),
-              BottomNavigationBarItem(
+              const BottomNavigationBarItem(
                 icon: Icon(Icons.settings),
                 label: 'Cài đặt',
               ),
             ],
-          ),
-        ],
-      ) : null,
+          ) : null,
     );
   }
 }

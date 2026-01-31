@@ -12,6 +12,7 @@ import 'controllers/sales_return_provider.dart';
 import 'controllers/purchase_provider.dart';
 import 'controllers/branch_provider.dart';
 import 'controllers/customer_provider.dart';
+import 'controllers/notification_provider.dart';
 import 'core/routes.dart';
 import 'core/route_observer.dart';
 import 'views/main_scaffold.dart';
@@ -54,6 +55,7 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (context) => AuthProvider()),
+        // AuthProvider phải đứng trước; ProductProvider nhận authProvider để isPro/user luôn khả dụng ngay khi khởi động.
         ChangeNotifierProxyProvider<AuthProvider, ProductProvider>(
           create: (context) => ProductProvider(
             Provider.of<AuthProvider>(context, listen: false),
@@ -106,6 +108,12 @@ class MyApp extends StatelessWidget {
             Provider.of<AuthProvider>(context, listen: false),
           ),
           update: (context, authProvider, previous) => SalesReturnProvider(authProvider),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, NotificationProvider>(
+          create: (context) => NotificationProvider(
+            Provider.of<AuthProvider>(context, listen: false),
+          ),
+          update: (context, authProvider, previous) => NotificationProvider(authProvider),
         ),
       ],
       child: MaterialApp(
