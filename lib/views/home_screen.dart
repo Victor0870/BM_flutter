@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, debugPrint;
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:provider/provider.dart';
 import '../../core/routes.dart';
 import '../../core/route_observer.dart';
@@ -11,30 +10,32 @@ import '../../controllers/sales_provider.dart';
 import '../../services/sales_service.dart';
 import '../../services/product_service.dart';
 import '../../models/sale_model.dart';
+import '../../utils/platform_utils.dart';
 import 'package:intl/intl.dart';
-import '../widgets/responsive_container.dart';
 
-/// Padding và spacing theo breakpoint chuẩn (responsive_container)
-double _contentPadding(BuildContext c) {
-  if (isMobile(c)) return 16;
-  if (isTablet(c)) return 20;
-  return 32;
+/// Padding và spacing theo platform (mobile vs desktop).
+double _contentPadding(BuildContext c, bool isMobile) {
+  return isMobile ? 16 : 32;
 }
 
-double _sectionSpacing(BuildContext c) {
-  if (isMobile(c)) return 20;
-  return 32;
+double _sectionSpacing(BuildContext c, bool isMobile) {
+  return isMobile ? 20 : 32;
 }
 
-/// Màn hình chính — Adaptive Dashboard (thích ứng mobile / tablet / desktop)
+/// Màn hình chính — Dashboard (mobile hoặc desktop theo [forceMobile] từ MainScaffold).
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform]. MainScaffold truyền true (mobile) hoặc false (desktop).
+  final bool? forceMobile;
+
+  const HomeScreen({super.key, this.forceMobile});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, RouteAware {
+  bool get _isMobileLayout => widget.forceMobile ?? isMobilePlatform;
+
   double _todayRevenue = 0.0;
   int _todaySalesCount = 0;
   bool _isLoadingStats = true;
@@ -44,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   SalesProvider? _salesProvider;
   int? _lastSeenCheckoutNotifyCount;
   Timer? _refreshDebounceTimer;
+  Timer? _salesStreamDebounceTimer;
   bool _needsRefreshOnNextBuild = false;
   StreamSubscription<List<SaleModel>>? _salesStreamSubscription;
   bool _salesStreamStarted = false;
@@ -136,15 +138,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     }
   }
 
-  /// Lắng nghe thay đổi sales real-time từ Firestore (PRO/Web).
-  /// Khi có đơn hàng mới từ thiết bị khác, tự động refresh dashboard.
+  /// Lắng nghe thay đổi sales real-time từ Firestore (gói PRO).
+  /// Khi có hóa đơn mới hoặc thanh toán từ thiết bị khác (desktop/mobile) → Firestore thay đổi → stream emit → dashboard tự refresh.
   void _startSalesStreamListener() {
     if (_salesStreamStarted || !mounted) return;
     final authProvider = context.read<AuthProvider>();
     if (authProvider.user == null || !authProvider.isFirebaseReady) return;
-    if (!authProvider.isPro && !kIsWeb) return;
+    // Chỉ gói PRO ghi Firestore → mới có stream real-time cross-device (desktop/mobile)
+    if (!authProvider.isPro) return;
 
-    _salesStreamStarted = true;
     final productService = ProductService(
       isPro: authProvider.isPro,
       userId: authProvider.user!.uid,
@@ -157,10 +159,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     final stream = salesService.watchSales();
     if (stream == null) return;
 
+    _salesStreamStarted = true;
     _salesStreamSubscription = stream.listen(
       (_) {
         if (!mounted) return;
-        _loadDashboardStats(force: true);
+        // Debounce: nhiều thay đổi liên tiếp (vd nhiều đơn thanh toán) chỉ refresh 1 lần
+        _salesStreamDebounceTimer?.cancel();
+        _salesStreamDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+          if (mounted) _loadDashboardStats(force: true);
+        });
       },
       onError: (e) {
         if (kDebugMode) debugPrint('HomeScreen sales stream error: $e');
@@ -171,6 +178,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   @override
   void dispose() {
     _refreshDebounceTimer?.cancel();
+    _salesStreamDebounceTimer?.cancel();
     _salesStreamSubscription?.cancel();
     _salesProvider?.removeListener(_onSalesProviderChanged);
     _salesProvider = null;
@@ -184,7 +192,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      _refreshIfNeeded();
+      // Trì hoãn refresh sang frame tiếp theo để cây widget ổn định, tránh lỗi deactivated
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refreshIfNeeded();
+      });
     }
   }
 
@@ -221,26 +232,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
 
   Future<void> _loadDashboardStats({bool force = false}) async {
     if (!mounted) return;
-    
+
     if (!force && _isLoadingStats) return;
 
-    try {
-      final authProvider = context.read<AuthProvider>();
-      
-      if (authProvider.user == null || !authProvider.isFirebaseReady) {
-        if (kDebugMode) {
-          debugPrint('⏳ Waiting for auth state: user=${authProvider.user != null}, firebaseReady=${authProvider.isFirebaseReady}');
-        }
-        setState(() {
-          _isLoadingStats = false;
-        });
-        return;
+    // Capture all context-dependent values BEFORE any await to avoid using
+    // context after widget may be deactivated/disposed.
+    final authProvider = context.read<AuthProvider>();
+    final branchId = context.read<BranchProvider>().currentBranchId;
+    final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
+
+    if (authProvider.user == null || !authProvider.isFirebaseReady) {
+      if (kDebugMode) {
+        debugPrint('⏳ Waiting for auth state: user=${authProvider.user != null}, firebaseReady=${authProvider.isFirebaseReady}');
       }
+      if (mounted) {
+        setState(() => _isLoadingStats = false);
+      }
+      return;
+    }
 
-      setState(() {
-        _isLoadingStats = true;
-      });
+    if (mounted) {
+      setState(() => _isLoadingStats = true);
+    }
 
+    try {
       final productService = ProductService(
         isPro: authProvider.isPro,
         userId: authProvider.user!.uid,
@@ -258,9 +273,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       final todayRevenue = await salesService.getTodayRevenue();
       final todaySalesCount = await salesService.getTodaySalesCount();
 
-      // Giá trị tồn kho thực tế: tổng (importPrice * stock) theo chi nhánh hiện tại hoặc toàn bộ
       if (!mounted) return;
-      final branchId = context.read<BranchProvider>().currentBranchId;
+
+      // Giá trị tồn kho thực tế: tổng (importPrice * stock) theo chi nhánh hiện tại hoặc toàn bộ
       final products = await productService.getProducts(includeInactive: false);
       double totalInventoryValue = 0.0;
       for (final product in products) {
@@ -280,11 +295,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       }
       
       // Load danh sách hóa đơn gần đây (5 hóa đơn mới nhất)
-      setState(() {
-        _isLoadingRecentSales = true;
-        _isLoadingBestSellers = true;
-        _isLoadingWeeklyRevenue = true;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoadingRecentSales = true;
+          _isLoadingBestSellers = true;
+          _isLoadingWeeklyRevenue = true;
+        });
+      }
       
       final allSales = await salesService.getSales();
       // Sắp xếp theo thời gian mới nhất và lấy 5 hóa đơn đầu tiên
@@ -372,7 +389,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
         setState(() {
           _isLoadingStats = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        scaffoldMessenger?.showSnackBar(
           SnackBar(
             content: Text('Lỗi khi tải thống kê: $e'),
             backgroundColor: Colors.red,
@@ -430,10 +447,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     }
 
     final authProvider = context.watch<AuthProvider>();
-    final bool isAndroid = !kIsWeb && Platform.isAndroid;
-    final bool useDrawer = isMobile(context) &&
-        !isAndroid; // Drawer chỉ trên mobile không phải Android (web/iOS)
-    final bool useMobileLayout = isMobile(context);
+    final bool useMobileLayout = widget.forceMobile ?? isMobilePlatform;
+    final bool useDrawer = useMobileLayout && !isAndroidPlatform;
 
     return Scaffold(
       key: _scaffoldKey,
@@ -453,7 +468,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                       : SingleChildScrollView(
                           child: Padding(
                             padding: EdgeInsets.all(
-                                _contentPadding(context)),
+                                _contentPadding(context, useMobileLayout)),
                             child: ConstrainedBox(
                               constraints: const BoxConstraints(maxWidth: 1400),
                               child: Column(
@@ -461,13 +476,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                 children: [
                                   _buildDashboardHeader(context),
                                   SizedBox(
-                                      height: _sectionSpacing(context)),
+                                      height: _sectionSpacing(context, useMobileLayout)),
                                   _buildStatsGrid(context),
                                   SizedBox(
-                                      height: _sectionSpacing(context)),
+                                      height: _sectionSpacing(context, useMobileLayout)),
                                   _buildChartAndBestSellers(context),
                                   SizedBox(
-                                      height: _sectionSpacing(context)),
+                                      height: _sectionSpacing(context, useMobileLayout)),
                                   _buildRecentTransactions(context),
                                 ],
                               ),
@@ -483,10 +498,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     );
   }
 
-  /// Dashboard tối giản cho Mobile (width < 600px): Top Cards + Quick Actions.
-  /// Không hiển thị biểu đồ và bảng giao dịch.
+  /// Dashboard tối giản cho Mobile: Top Cards + Quick Actions.
   Widget _buildMobileDashboard(BuildContext context) {
-    final pad = _contentPadding(context);
+    final pad = _contentPadding(context, true);
 
     return Padding(
       padding: EdgeInsets.all(pad),
@@ -494,7 +508,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildMobileTopCards(context, horizontalPad: pad),
-          SizedBox(height: _sectionSpacing(context)),
+          SizedBox(height: _sectionSpacing(context, true)),
           _buildMobileQuickActions(context),
         ],
       ),
@@ -1052,11 +1066,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildHeader(BuildContext context, AuthProvider authProvider) {
-    final useMobileLayout = isMobile(context);
-    final pad = _contentPadding(context);
-    final bool useDrawer = !kIsWeb &&
-        Platform.isAndroid == false &&
-        isMobile(context);
+    final useMobileLayout = _isMobileLayout;
+    final pad = _contentPadding(context, _isMobileLayout);
+    final bool useDrawer = !isAndroidPlatform && _isMobileLayout;
 
     return Container(
       height: useMobileLayout ? 56 : 64,
@@ -1184,7 +1196,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildDashboardHeader(BuildContext context) {
-    final useMobileLayout = isMobile(context);
+    final useMobileLayout = _isMobileLayout;
 
     final titleSection = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1264,7 +1276,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildStatsGrid(BuildContext context) {
-    final useMobileLayout = isMobile(context);
+    final useMobileLayout = _isMobileLayout;
     final crossAxisCount = useMobileLayout ? 2 : 4;
     final spacing = useMobileLayout ? 12.0 : 16.0;
 
@@ -1274,7 +1286,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       crossAxisCount: crossAxisCount,
       mainAxisSpacing: spacing,
       crossAxisSpacing: spacing,
-      childAspectRatio: useMobileLayout ? 2.0 : 2.25,
+      childAspectRatio: useMobileLayout ? 1.7 : 2.0,
       children: [
             _StatsCard(
               title: 'Tổng doanh thu',
@@ -1315,8 +1327,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildChartAndBestSellers(BuildContext context) {
-    final useRow = isDesktop(context);
-    final gap = isMobile(context) ? 16.0 : 24.0;
+    final useRow = !_isMobileLayout;
+    final gap = _isMobileLayout ? 16.0 : 24.0;
 
     if (useRow) {
       return Row(
@@ -1338,8 +1350,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildChartSection(BuildContext context) {
-    final pad = isMobile(context) ? 16.0 : 24.0;
-    final chartHeight = isMobile(context) ? 200.0 : 280.0;
+    final pad = _isMobileLayout ? 16.0 : 24.0;
+    final chartHeight = _isMobileLayout ? 200.0 : 280.0;
 
     return Container(
       padding: EdgeInsets.all(pad),
@@ -1485,7 +1497,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildBestSellers(BuildContext context) {
-    final pad = isMobile(context) ? 16.0 : 24.0;
+    final pad = _isMobileLayout ? 16.0 : 24.0;
 
     return Container(
       padding: EdgeInsets.all(pad),
@@ -1604,8 +1616,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   }
 
   Widget _buildRecentTransactions(BuildContext context) {
-    final useMobileLayout = isMobile(context);
-    final pad = isMobile(context) ? 16.0 : 24.0;
+    final useMobileLayout = _isMobileLayout;
+    final pad = _isMobileLayout ? 16.0 : 24.0;
 
     return Container(
       decoration: BoxDecoration(
@@ -2227,83 +2239,98 @@ class _StatsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 20),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isUp ? Colors.green.shade50 : Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isUp ? Icons.trending_up : Icons.trending_down,
-                      size: 12,
-                      color: isUp ? Colors.green.shade600 : Colors.red.shade600,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      trend,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isUp ? Colors.green.shade600 : Colors.red.shade600,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SizedBox(
+            width: constraints.maxWidth,
+            height: constraints.maxHeight,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: constraints.maxWidth,
+                child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, color: color, size: 18),
                       ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isUp ? Colors.green.shade50 : Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isUp ? Icons.trending_up : Icons.trending_down,
+                              size: 10,
+                              color: isUp ? Colors.green.shade600 : Colors.red.shade600,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              trend,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: isUp ? Colors.green.shade600 : Colors.red.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    title.toUpperCase(),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade600,
+                      letterSpacing: 1.0,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 6),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: Text(
+                      value,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0F172A),
+                        height: 1.0,
+                      ),
+                      maxLines: 1,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          const Spacer(),
-          Text(
-            title.toUpperCase(),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade600,
-              letterSpacing: 1.2,
             ),
           ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.center,
-            child: Text(
-              value,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF0F172A),
-                height: 1.0,
-              ),
-              maxLines: 1,
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

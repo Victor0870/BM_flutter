@@ -2,20 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/customer_provider.dart';
 import '../../models/customer_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/ad_banner_widget.dart';
 
-/// Màn hình form thêm/sửa khách hàng (breakpoint từ responsive_container)
+/// Màn hình form thêm/sửa khách hàng (mobile/desktop theo platform).
 class CustomerFormScreen extends StatefulWidget {
   final CustomerModel? customer;
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
 
-  const CustomerFormScreen({super.key, this.customer});
+  const CustomerFormScreen({super.key, this.customer, this.forceMobile});
 
   @override
   State<CustomerFormScreen> createState() => _CustomerFormScreenState();
 }
 
 class _CustomerFormScreenState extends State<CustomerFormScreen> {
+  bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
@@ -87,13 +91,9 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
     }
   }
 
-  bool _isWide(BuildContext context) =>
-      !isMobile(context);
-
   @override
   Widget build(BuildContext context) {
-    final isWide = _isWide(context);
-    final isMobile = !isWide;
+    final isMobile = _useMobileLayout;
 
     return Scaffold(
       appBar: AppBar(
@@ -111,7 +111,7 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
                   children: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final twoCol = constraints.maxWidth >= kBreakpointMobile;
+                        final twoCol = !_useMobileLayout;
                         if (twoCol) {
                           return Row(
                             crossAxisAlignment: CrossAxisAlignment.start,

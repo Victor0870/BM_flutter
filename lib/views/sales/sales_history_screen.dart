@@ -1,7 +1,5 @@
-import 'dart:io' show Platform;
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -10,36 +8,48 @@ import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../services/sales_service.dart';
 import '../../services/product_service.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import 'sale_detail_screen.dart';
 
-/// Màn hình hiển thị lịch sử đơn hàng đã bán với thiết kế mới
+/// Màn hình hiển thị lịch sử đơn hàng đã bán (mobile/desktop theo platform).
 class SalesHistoryScreen extends StatelessWidget {
-  const SalesHistoryScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const SalesHistoryScreen({super.key, this.forceMobile});
 
   @override
   Widget build(BuildContext context) {
-    final bool isDesktop =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-
-    Widget mainContent = const _SalesHistoryContent();
+    final useMobileLayout = forceMobile ?? isMobilePlatform;
 
     return Scaffold(
-      appBar: isDesktop
+      appBar: isDesktopPlatform
           ? null
           : AppBar(
               title: const Text('Quản lý đơn hàng'),
             ),
-      body: mainContent,
+      body: _SalesHistoryContent(useMobileLayout: useMobileLayout),
     );
   }
 }
 
 class _SalesHistoryContent extends StatefulWidget {
-  const _SalesHistoryContent();
+  final bool useMobileLayout;
+
+  const _SalesHistoryContent({required this.useMobileLayout});
 
   @override
   State<_SalesHistoryContent> createState() => _SalesHistoryContentState();
+}
+
+/// Các lựa chọn khoảng thời gian hiển thị
+enum _TimeRangeKey {
+  today,
+  week,
+  month,
+  all,
+  custom,
 }
 
 class _SalesHistoryContentState extends State<_SalesHistoryContent> {
@@ -50,10 +60,73 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
   Timer? _searchDebounce;
   String _searchQuery = '';
 
+  /// Khoảng thời gian hiển thị
+  _TimeRangeKey _timeRange = _TimeRangeKey.week;
+  DateTime? _customStart;
+  DateTime? _customEnd;
+
   @override
   void initState() {
     super.initState();
     _loadSales();
+  }
+
+  /// Trả về (startDate, endDate) theo khoảng thời gian đã chọn. endDate là cuối ngày (23:59:59).
+  (DateTime?, DateTime?) _getDateRange() {
+    final now = DateTime.now();
+    switch (_timeRange) {
+      case _TimeRangeKey.today:
+        final start = DateTime(now.year, now.month, now.day);
+        final end = start.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+        return (start, end);
+      case _TimeRangeKey.week:
+        final start = now.subtract(const Duration(days: 6));
+        final startOfStart = DateTime(start.year, start.month, start.day);
+        final end = DateTime(now.year, now.month, now.day)
+            .add(const Duration(days: 1))
+            .subtract(const Duration(milliseconds: 1));
+        return (startOfStart, end);
+      case _TimeRangeKey.month:
+        final start = now.subtract(const Duration(days: 29));
+        final startOfStart = DateTime(start.year, start.month, start.day);
+        final end = DateTime(now.year, now.month, now.day)
+            .add(const Duration(days: 1))
+            .subtract(const Duration(milliseconds: 1));
+        return (startOfStart, end);
+      case _TimeRangeKey.all:
+        return (null, null);
+      case _TimeRangeKey.custom:
+        if (_customStart == null || _customEnd == null) return (null, null);
+        final endOfDay = DateTime(_customEnd!.year, _customEnd!.month, _customEnd!.day)
+            .add(const Duration(days: 1))
+            .subtract(const Duration(milliseconds: 1));
+        return (_customStart, endOfDay);
+    }
+  }
+
+  Future<void> _pickCustomDateRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 2),
+      lastDate: now,
+      initialDateRange: _customStart != null && _customEnd != null
+          ? DateTimeRange(start: _customStart!, end: _customEnd!)
+          : DateTimeRange(
+              start: now.subtract(const Duration(days: 6)),
+              end: now,
+            ),
+      locale: const Locale('vi'),
+      helpText: 'Chọn khoảng thời gian',
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _timeRange = _TimeRangeKey.custom;
+        _customStart = DateTime(picked.start.year, picked.start.month, picked.start.day);
+        _customEnd = DateTime(picked.end.year, picked.end.month, picked.end.day);
+      });
+      _loadSales();
+    }
   }
 
   @override
@@ -110,7 +183,11 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
         productService: productService,
       );
 
-      final sales = await salesService.getSales();
+      final (startDate, endDate) = _getDateRange();
+      final sales = await salesService.getSales(
+        startDate: startDate,
+        endDate: endDate,
+      );
       setState(() {
         _sales = sales;
         _isLoading = false;
@@ -157,14 +234,13 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
   @override
   Widget build(BuildContext context) {
     final filteredSales = _getFilteredSales();
+    final useMobile = widget.useMobileLayout;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final screenWidth = constraints.maxWidth;
-        
-        // Xác định maxWidth theo breakpoint chuẩn (responsive_container.dart)
         double maxWidth;
-        if (screenWidth < kBreakpointMobile) {
+        if (useMobile) {
           maxWidth = screenWidth;
         } else if (screenWidth < kBreakpointTablet) {
           maxWidth = 900;
@@ -182,17 +258,29 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                   child: Column(
                     children: [
-                      _HeaderSection(onRefresh: _loadSales),
+                      _HeaderSection(onRefresh: _loadSales, isMobile: widget.useMobileLayout),
+                      const SizedBox(height: 16),
+                      _TimeRangeSelector(
+                        selected: _timeRange,
+                        customStart: _customStart,
+                        customEnd: _customEnd,
+                        onSelected: (key) {
+                          setState(() => _timeRange = key);
+                          _loadSales();
+                        },
+                        onCustomPick: _pickCustomDateRange,
+                        isMobile: widget.useMobileLayout,
+                      ),
                       const SizedBox(height: 16),
                       _SummaryCards(
                         isLoading: _isLoading,
                         errorMessage: _errorMessage,
                         stats: _getOrderStats(),
+                        isMobile: widget.useMobileLayout,
                       ),
                     ],
                   ),
                 ),
-                // DataTable tràn toàn bộ chiều rộng trong maxWidth
                 Expanded(
                   child: Card(
                     margin: EdgeInsets.zero,
@@ -208,6 +296,7 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
                       searchController: _searchController,
                       onSearchChanged: _onSearchChanged,
                       onRefresh: () => _loadSales(),
+                      isMobile: widget.useMobileLayout,
                     ),
                   ),
                 ),
@@ -223,12 +312,13 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
 
 class _HeaderSection extends StatelessWidget {
   final VoidCallback onRefresh;
+  final bool isMobile;
 
-  const _HeaderSection({required this.onRefresh});
+  const _HeaderSection({required this.onRefresh, required this.isMobile});
 
   @override
   Widget build(BuildContext context) {
-    final onMobile = isMobile(context);
+    final onMobile = isMobile;
     final buttons = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -302,15 +392,140 @@ class _HeaderSection extends StatelessWidget {
   }
 }
 
+/// Bộ chọn khoảng thời gian hiển thị danh sách hóa đơn (mobile: chips cuộn ngang, desktop: hàng chips).
+class _TimeRangeSelector extends StatelessWidget {
+  final _TimeRangeKey selected;
+  final DateTime? customStart;
+  final DateTime? customEnd;
+  final ValueChanged<_TimeRangeKey> onSelected;
+  final VoidCallback onCustomPick;
+  final bool isMobile;
+
+  const _TimeRangeSelector({
+    required this.selected,
+    required this.customStart,
+    required this.customEnd,
+    required this.onSelected,
+    required this.onCustomPick,
+    required this.isMobile,
+  });
+
+  String _label(_TimeRangeKey key) {
+    switch (key) {
+      case _TimeRangeKey.today:
+        return 'Hôm nay';
+      case _TimeRangeKey.week:
+        return '7 ngày qua';
+      case _TimeRangeKey.month:
+        return '30 ngày qua';
+      case _TimeRangeKey.all:
+        return 'Tất cả';
+      case _TimeRangeKey.custom:
+        if (customStart != null && customEnd != null) {
+          return '${DateFormat('dd/MM').format(customStart!)} - ${DateFormat('dd/MM/yyyy').format(customEnd!)}';
+        }
+        return 'Tùy chọn';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const chipPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+    final selectedBg = Colors.blue.shade600;
+    final selectedFg = Colors.white;
+    final unselectedBg = const Color(0xFFF1F5F9);
+    final unselectedFg = const Color(0xFF64748B);
+
+    Widget chip(_TimeRangeKey key, {bool isCustom = false}) {
+      final isSelected = selected == key;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: FilterChip(
+          label: Text(
+            _label(key),
+            style: TextStyle(
+              fontSize: isMobile ? 13 : 14,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              color: isSelected ? selectedFg : unselectedFg,
+            ),
+          ),
+          selected: isSelected,
+          onSelected: isCustom
+              ? (_) => onCustomPick()
+              : (v) {
+                  if (v) onSelected(key);
+                },
+          selectedColor: selectedBg,
+          backgroundColor: unselectedBg,
+          checkmarkColor: selectedFg,
+          padding: chipPadding,
+          side: BorderSide(
+            color: isSelected ? selectedBg : const Color(0xFFE2E8F0),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+      );
+    }
+
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!isMobile)
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Text(
+              'Khoảng thời gian:',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+        chip(_TimeRangeKey.today),
+        chip(_TimeRangeKey.week),
+        chip(_TimeRangeKey.month),
+        chip(_TimeRangeKey.all),
+        chip(_TimeRangeKey.custom, isCustom: true),
+      ],
+    );
+
+    if (isMobile) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Khoảng thời gian',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: row,
+          ),
+        ],
+      );
+    }
+
+    return row;
+  }
+}
+
 class _SummaryCards extends StatelessWidget {
   final bool isLoading;
   final String? errorMessage;
   final Map<String, int> stats;
+  final bool isMobile;
 
   const _SummaryCards({
     required this.isLoading,
     this.errorMessage,
     required this.stats,
+    required this.isMobile,
   });
 
   @override
@@ -351,7 +566,7 @@ class _SummaryCards extends StatelessWidget {
       ),
     ];
 
-    if (isMobile(context)) {
+    if (isMobile) {
       // Mobile: cuộn ngang để mỗi card đủ rộng hiển thị đủ nội dung
       return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -468,6 +683,7 @@ class _SalesTable extends StatelessWidget {
   final TextEditingController searchController;
   final ValueChanged<String> onSearchChanged;
   final Future<void> Function() onRefresh;
+  final bool isMobile;
 
   const _SalesTable({
     required this.sales,
@@ -476,6 +692,7 @@ class _SalesTable extends StatelessWidget {
     required this.searchController,
     required this.onSearchChanged,
     required this.onRefresh,
+    required this.isMobile,
   });
 
   void _openSaleDetail(BuildContext context, SaleModel sale, {bool fullScreen = false}) {
@@ -483,7 +700,7 @@ class _SalesTable extends StatelessWidget {
       context,
       MaterialPageRoute(
         fullscreenDialog: fullScreen,
-        builder: (_) => SaleDetailScreen(sale: sale),
+        builder: (_) => SaleDetailScreen(sale: sale, forceMobile: isMobile),
       ),
     );
   }
@@ -595,7 +812,6 @@ class _SalesTable extends StatelessWidget {
                           onRefresh: onRefresh,
                           child: LayoutBuilder(
                             builder: (context, constraints) {
-                              final isMobile = constraints.maxWidth < kBreakpointMobile;
                               if (isMobile) {
                                 return _SalesListMobile(
                                   sales: sales,

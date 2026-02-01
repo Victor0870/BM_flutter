@@ -8,16 +8,20 @@ import '../../services/firebase_service.dart';
 import '../../services/einvoice_service.dart';
 import '../../services/sales_service.dart';
 import '../../models/shop_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import 'sales_return_form_screen.dart';
 
-/// Màn hình hiển thị chi tiết hóa đơn
+/// Màn hình hiển thị chi tiết hóa đơn (mobile/desktop theo platform).
 class SaleDetailScreen extends StatefulWidget {
   final SaleModel sale;
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
 
   const SaleDetailScreen({
     super.key,
     required this.sale,
+    this.forceMobile,
   });
 
   @override

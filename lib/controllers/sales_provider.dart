@@ -75,8 +75,8 @@ class SalesProvider with ChangeNotifier {
   
   double get cartTotal => getCartTotal(_activeTabId);
   
-  /// Tính toán tổng tiền: totalBeforeDiscount, discountAmount, finalTotal
-  /// Trả về Map với các key: totalBeforeDiscount, discountAmount, finalTotal, subTotal
+  /// Tính toán tổng tiền: totalBeforeDiscount, discountAmount, taxAmount, finalTotal
+  /// Trả về Map với các key: subTotal, totalBeforeDiscount, discountAmount, taxAmount, vatRate, finalTotal
   Map<String, double> calculateTotals(int? tabId) {
     final id = tabId ?? _activeTabId;
     // subTotal: Tổng tiền hàng sau khi trừ chiết khấu từng dòng (từ item.subtotal)
@@ -88,30 +88,33 @@ class SalesProvider with ChangeNotifier {
     double totalDiscountAmount = 0.0;
     if (discountValue > 0) {
       if (isPercentage) {
-        // Chiết khấu theo phần trăm
         totalDiscountAmount = subTotal * (discountValue / 100);
       } else {
-        // Chiết khấu theo số tiền
         totalDiscountAmount = discountValue;
-        // Đảm bảo không vượt quá tổng tiền (ràng buộc dữ liệu)
         if (totalDiscountAmount > subTotal) {
           totalDiscountAmount = subTotal;
         }
       }
     }
-    
-    // Đảm bảo totalDiscountAmount không bao giờ lớn hơn subTotal
     if (totalDiscountAmount > subTotal) {
       totalDiscountAmount = subTotal;
     }
     
-    final finalTotal = subTotal - totalDiscountAmount;
+    // Tiền sau chiết khấu (trước thuế)
+    final amountBeforeTax = subTotal - totalDiscountAmount;
+    
+    // Thuế VAT từ cài đặt shop
+    final vatRate = authProvider.shop?.vatRate ?? 0.0;
+    final taxAmount = vatRate > 0 ? amountBeforeTax * (vatRate / 100) : 0.0;
+    final finalTotal = amountBeforeTax + taxAmount;
     
     return {
-      'subTotal': subTotal, // Tổng sau khi trừ chiết khấu từng dòng
-      'totalBeforeDiscount': subTotal, // Tương thích ngược
+      'subTotal': subTotal,
+      'totalBeforeDiscount': subTotal,
       'discountAmount': totalDiscountAmount,
       'totalDiscountAmount': totalDiscountAmount,
+      'taxAmount': taxAmount,
+      'vatRate': vatRate,
       'finalTotal': finalTotal,
     };
   }
@@ -511,6 +514,17 @@ class SalesProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Xóa chọn khách hàng và xóa toàn bộ thông tin khách (name, phone, address, taxCode) để nhập khách mới.
+  void clearCustomerSelection({int? tabId}) {
+    final id = tabId ?? _activeTabId;
+    _tabsCustomer[id] = null;
+    _tabsCustomerName[id] = null;
+    _tabsCustomerPhone[id] = null;
+    _tabsCustomerAddress[id] = null;
+    _tabsCustomerTaxCode[id] = null;
+    notifyListeners();
+  }
+
   /// Cập nhật khách hàng đã chọn
   void setSelectedCustomer(CustomerModel? customer, {int? tabId}) {
     final id = tabId ?? _activeTabId;
@@ -743,10 +757,11 @@ class SalesProvider with ChangeNotifier {
                         'Nhân viên';
 
       // Tạo đơn hàng với đầy đủ thông tin
-      // Tính toán chi tiết chiết khấu
       final totals = calculateTotals(id);
       final subTotal = totals['subTotal'] ?? 0.0;
       final totalDiscountAmount = totals['totalDiscountAmount'] ?? 0.0;
+      final taxAmount = totals['taxAmount'] ?? 0.0;
+      final vatRate = totals['vatRate'] ?? 0.0;
       final orderDiscountValue = _tabsOrderDiscountValue[id] ?? 0.0;
       final isDiscountPercentage = _tabsIsDiscountPercentage[id] ?? false;
       final discountApprovedBy = _tabsDiscountApprovedBy[id];
@@ -755,6 +770,8 @@ class SalesProvider with ChangeNotifier {
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         timestamp: DateTime.now(),
         totalAmount: totalAmount,
+        vatRate: vatRate > 0 ? vatRate : null,
+        taxAmount: taxAmount > 0 ? taxAmount : null,
         items: cartItems,
         paymentMethod: getPaymentMethod(id),
         userId: authProvider.user!.uid,
@@ -892,10 +909,12 @@ class SalesProvider with ChangeNotifier {
       // Tạo đơn hàng với paymentStatus = PENDING
       final orderId = DateTime.now().millisecondsSinceEpoch.toString();
       final cartItems = cart.values.toList();
-      // Tính toán chi tiết chiết khấu
       final totals = calculateTotals(id);
       final subTotal = totals['subTotal'] ?? 0.0;
       final totalDiscountAmount = totals['totalDiscountAmount'] ?? 0.0;
+      final finalTotal = totals['finalTotal'] ?? 0.0;
+      final taxAmount = totals['taxAmount'] ?? 0.0;
+      final vatRate = totals['vatRate'] ?? 0.0;
       final orderDiscountValue = _tabsOrderDiscountValue[id] ?? 0.0;
       final isDiscountPercentage = _tabsIsDiscountPercentage[id] ?? false;
       final discountApprovedBy = _tabsDiscountApprovedBy[id];
@@ -903,7 +922,9 @@ class SalesProvider with ChangeNotifier {
       final sale = SaleModel(
         id: orderId,
         timestamp: DateTime.now(),
-        totalAmount: getCartTotal(id),
+        totalAmount: finalTotal,
+        vatRate: vatRate > 0 ? vatRate : null,
+        taxAmount: taxAmount > 0 ? taxAmount : null,
         items: cartItems,
         paymentMethod: 'TRANSFER_MANUAL', // Chuyển khoản thủ công
         paymentStatus: 'PENDING', // Chưa thanh toán
@@ -1021,10 +1042,11 @@ class SalesProvider with ChangeNotifier {
 
       // Tạo đơn hàng với paymentStatus = PENDING
       final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-      // Tính toán chi tiết chiết khấu
       final totals = calculateTotals(id);
       final subTotal = totals['subTotal'] ?? 0.0;
       final totalDiscountAmount = totals['totalDiscountAmount'] ?? 0.0;
+      final taxAmount = totals['taxAmount'] ?? 0.0;
+      final vatRate = totals['vatRate'] ?? 0.0;
       final orderDiscountValue = _tabsOrderDiscountValue[id] ?? 0.0;
       final isDiscountPercentage = _tabsIsDiscountPercentage[id] ?? false;
       final discountApprovedBy = _tabsDiscountApprovedBy[id];
@@ -1033,6 +1055,8 @@ class SalesProvider with ChangeNotifier {
         id: orderId,
         timestamp: DateTime.now(),
         totalAmount: totalAmount,
+        vatRate: vatRate > 0 ? vatRate : null,
+        taxAmount: taxAmount > 0 ? taxAmount : null,
         items: cartItems,
         paymentMethod: 'PAYOS', // Thanh toán qua PayOS QR
         paymentStatus: 'PENDING', // Chưa thanh toán

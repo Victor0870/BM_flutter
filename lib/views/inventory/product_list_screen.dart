@@ -1,6 +1,3 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -11,20 +8,25 @@ import '../../controllers/product_provider.dart';
 import '../../core/routes.dart';
 import '../../models/product_model.dart';
 import '../../models/category_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/ad_banner_widget.dart';
 import 'category_management_screen.dart';
 import 'product_form_screen.dart';
 
-/// Màn hình danh sách sản phẩm với thiết kế mới
+/// Màn hình danh sách sản phẩm (mobile/desktop theo platform).
 class ProductListScreen extends StatefulWidget {
-  const ProductListScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const ProductListScreen({super.key, this.forceMobile});
 
   @override
   State<ProductListScreen> createState() => _ProductListScreenState();
 }
 
 class _ProductListScreenState extends State<ProductListScreen> {
+  bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
   String? _selectedCategoryId;
   String? _selectedStatus;
   final TextEditingController _searchController = TextEditingController();
@@ -54,7 +56,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const ProductFormScreen(),
+        builder: (context) => ProductFormScreen(forceMobile: _useMobileLayout),
       ),
     ).then((_) {
       _refreshProducts();
@@ -65,7 +67,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const CategoryManagementScreen(),
+        builder: (context) => CategoryManagementScreen(forceMobile: _useMobileLayout),
       ),
     ).then((_) {
       if (mounted) {
@@ -78,7 +80,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ProductFormScreen(product: product),
+        builder: (context) => ProductFormScreen(product: product, forceMobile: _useMobileLayout),
       ),
     ).then((_) {
       _refreshProducts();
@@ -479,9 +481,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDesktopPlatform =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    final useMobileLayout = isMobile(context);
+    final useMobileLayout = _useMobileLayout;
 
     return Scaffold(
       appBar: isDesktopPlatform
@@ -648,7 +648,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
         final filteredProducts = _getFilteredProducts(productProvider.products);
 
-        if (isMobile(context)) {
+        if (_useMobileLayout) {
           return _buildMobileProductList(
             context,
             filteredProducts: filteredProducts,
@@ -670,7 +670,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     required List<ProductModel> filteredProducts,
     required ProductProvider productProvider,
   }) {
-    final mobile = isMobile(context);
+    final mobile = _useMobileLayout;
     final listPadding = mobile
         ? const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
         : const EdgeInsets.fromLTRB(12, 8, 12, 16);
@@ -687,6 +687,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
           return Padding(
             padding: EdgeInsets.only(bottom: itemBottom),
             child: _ProductListCard(
+              isMobile: _useMobileLayout,
               product: product,
               stockCurrentBranch: productProvider.getStockForCurrentBranch(product),
               onEdit: () => _navigateToEditProduct(product),
@@ -790,6 +791,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
 /// Card cho mỗi sản phẩm trên Mobile: ảnh (nếu có), tên, mã vạch, tồn kho theo chi nhánh; menu Sửa/Xóa/Cập nhật tồn kho.
 class _ProductListCard extends StatelessWidget {
+  final bool isMobile;
   final ProductModel product;
   final double stockCurrentBranch;
   final VoidCallback onEdit;
@@ -798,6 +800,7 @@ class _ProductListCard extends StatelessWidget {
   final VoidCallback onQuickStockUpdate;
 
   const _ProductListCard({
+    required this.isMobile,
     required this.product,
     required this.stockCurrentBranch,
     required this.onEdit,
@@ -844,7 +847,7 @@ class _ProductListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stock = stockCurrentBranch;
-    final mobile = isMobile(context);
+    final mobile = isMobile;
     Color statusColor = Colors.green;
     if (stock == 0) {
       statusColor = Colors.red;

@@ -5,12 +5,16 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../controllers/auth_provider.dart';
 import '../../models/shop_model.dart';
 import '../../services/firebase_service.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../core/routes.dart';
 
-/// Màn hình cài đặt thông tin shop và hóa đơn điện tử
+/// Màn hình cài đặt thông tin shop và hóa đơn điện tử (mobile/desktop theo platform).
 class ShopSettingsScreen extends StatefulWidget {
-  const ShopSettingsScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const ShopSettingsScreen({super.key, this.forceMobile});
 
   @override
   State<ShopSettingsScreen> createState() => _ShopSettingsScreenState();
@@ -25,6 +29,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   final _addressController = TextEditingController();
   final _emailController = TextEditingController();
   final _taxCodeController = TextEditingController();
+  final _vatRateController = TextEditingController(); // Thuế VAT (%) cho hóa đơn bán hàng
   
   // Controllers cho hóa đơn điện tử
   final _staxController = TextEditingController();
@@ -56,6 +61,14 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
 
   bool _hasLoadedOnce = false;
 
+  /// Parse thuế VAT (%) từ chuỗi; trả về 0 nếu rỗng hoặc không hợp lệ.
+  static double _parseVatRate(String value) {
+    if (value.isEmpty) return 0.0;
+    final n = double.tryParse(value.replaceAll(',', '.'));
+    if (n == null || n < 0 || n > 100) return 0.0;
+    return n;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -75,6 +88,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     _addressController.dispose();
     _emailController.dispose();
     _taxCodeController.dispose();
+    _vatRateController.dispose();
     _staxController.dispose();
     _serialController.dispose();
     _einvoiceUsernameController.dispose();
@@ -155,6 +169,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
         _addressController.text = shop.address ?? '';
         _emailController.text = shop.email ?? '';
         _taxCodeController.text = shop.taxCode ?? '';
+        _vatRateController.text = shop.vatRate > 0 ? shop.vatRate.toStringAsFixed(0) : '';
         _staxController.text = shop.stax ?? '';
         _serialController.text = shop.serial ?? '';
         _einvoiceUsernameController.text = shop.einvoiceConfig?.username ?? '';
@@ -335,6 +350,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
         address: _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         taxCode: _taxCodeController.text.trim().isEmpty ? null : _taxCodeController.text.trim(),
+        vatRate: _parseVatRate(_vatRateController.text.trim()),
         stax: _staxController.text.trim().isEmpty ? null : _staxController.text.trim(),
         serial: _serialController.text.trim().isEmpty ? null : _serialController.text.trim(),
         einvoiceConfig: einvoiceConfig,
@@ -391,7 +407,8 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
             duration: Duration(seconds: 2),
           ),
         );
-        Navigator.pop(context);
+        // Quay về trang chủ và xóa toàn bộ navigation stack
+        Navigator.pushNamedAndRemoveUntil(context, AppRoutes.home, (route) => false);
       }
     } catch (e) {
       if (mounted) {
@@ -652,9 +669,8 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   }
 
   /// Card hiển thị thông tin tài khoản: email, gói dịch vụ (PRO/BASIC).
-  /// Layout khác nhau cho mobile và desktop (breakpoint từ responsive_container).
   Widget _buildAccountInfoCard(BuildContext context) {
-    final isNarrow = isMobile(context);
+    final isNarrow = widget.forceMobile ?? isMobilePlatform;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -953,6 +969,18 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               border: OutlineInputBorder(),
                               prefixIcon: Icon(Icons.badge),
                             ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _vatRateController,
+                            decoration: const InputDecoration(
+                              labelText: 'Thuế VAT (%)',
+                              hintText: 'Ví dụ: 10',
+                              helperText: 'Áp dụng cho tổng tiền hóa đơn bán hàng. Để trống hoặc 0 = không thuế.',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.percent),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           ),
                           const SizedBox(height: 16),
 
@@ -1351,31 +1379,24 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         color: _enableCostPrice ? Colors.blue : Colors.grey,
                       ),
                     ),
-                    Consumer<AuthProvider>(
-                      builder: (context, authProvider, _) {
-                        final isAdmin = authProvider.isAdminUser;
-                        return SwitchListTile(
-                          title: const Text('Cho phép cập nhật nhanh tồn kho'),
-                          subtitle: Text(
-                            _allowQuickStockUpdate
-                                ? 'Cho phép chỉnh sửa nhanh số lượng tồn kho tại danh sách sản phẩm'
-                                : 'Chỉ cho phép điều chỉnh tồn kho qua Phiếu nhập kho',
-                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                          ),
-                          value: _allowQuickStockUpdate,
-                          onChanged: isAdmin
-                              ? (value) {
-                                  setState(() {
-                                    _allowQuickStockUpdate = value;
-                                  });
-                                }
-                              : null,
-                          secondary: Icon(
-                            _allowQuickStockUpdate ? Icons.edit_note : Icons.inventory_2_outlined,
-                            color: _allowQuickStockUpdate ? Colors.green : Colors.orange,
-                          ),
-                        );
+                    SwitchListTile(
+                      title: const Text('Cho phép cập nhật nhanh tồn kho'),
+                      subtitle: Text(
+                        _allowQuickStockUpdate
+                            ? 'Cho phép chỉnh sửa nhanh số lượng tồn kho tại danh sách sản phẩm'
+                            : 'Chỉ cho phép điều chỉnh tồn kho qua Phiếu nhập kho',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      value: _allowQuickStockUpdate,
+                      onChanged: (value) {
+                        setState(() {
+                          _allowQuickStockUpdate = value;
+                        });
                       },
+                      secondary: Icon(
+                        _allowQuickStockUpdate ? Icons.edit_note : Icons.inventory_2_outlined,
+                        color: _allowQuickStockUpdate ? Colors.green : Colors.orange,
+                      ),
                     ),
                   ],
                 ),

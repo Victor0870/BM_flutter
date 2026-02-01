@@ -4,11 +4,15 @@ import 'package:intl/intl.dart';
 import '../../controllers/notification_provider.dart';
 import '../../controllers/sales_provider.dart';
 import '../../models/notification_model.dart';
+import '../../utils/platform_utils.dart';
 import '../sales/sale_detail_screen.dart';
 
-/// Màn hình danh sách thông báo (tab Thông báo trong MainScaffold).
+/// Màn hình danh sách thông báo (tab Thông báo trong MainScaffold). (mobile/desktop theo platform)
 class NotificationScreen extends StatelessWidget {
-  const NotificationScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const NotificationScreen({super.key, this.forceMobile});
 
   @override
   Widget build(BuildContext context) {
@@ -39,9 +43,10 @@ class NotificationScreen extends StatelessWidget {
             itemCount: list.length,
             itemBuilder: (context, index) {
               final n = list[index];
+              final useMobile = forceMobile ?? isMobilePlatform;
               return _NotificationTile(
                 notification: n,
-                onTap: () => _onNotificationTap(context, np, n),
+                onTap: () => _onNotificationTap(context, np, n, useMobile),
               );
             },
           );
@@ -55,6 +60,7 @@ class NotificationScreen extends StatelessWidget {
     BuildContext context,
     NotificationProvider np,
     NotificationModel n,
+    bool forceMobile,
   ) async {
     np.markAsRead(n.id);
 
@@ -64,7 +70,7 @@ class NotificationScreen extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => SaleDetailScreen(sale: sale),
+            builder: (_) => SaleDetailScreen(sale: sale, forceMobile: forceMobile),
           ),
         );
       }

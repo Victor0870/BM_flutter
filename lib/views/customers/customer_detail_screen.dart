@@ -6,15 +6,18 @@ import '../../models/customer_model.dart';
 import '../../models/sale_model.dart';
 import '../../services/sales_service.dart';
 import '../../controllers/auth_provider.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../core/routes.dart';
 import 'customer_form_screen.dart';
 
-/// Màn hình chi tiết khách hàng
+/// Màn hình chi tiết khách hàng (mobile/desktop theo platform).
 class CustomerDetailScreen extends StatefulWidget {
   final CustomerModel customer;
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
 
-  const CustomerDetailScreen({super.key, required this.customer});
+  const CustomerDetailScreen({super.key, required this.customer, this.forceMobile});
 
   @override
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
@@ -103,7 +106,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => CustomerFormScreen(customer: widget.customer),
+                  builder: (context) => CustomerFormScreen(customer: widget.customer, forceMobile: widget.forceMobile ?? isMobilePlatform),
                 ),
               );
               // Reload customer data after edit

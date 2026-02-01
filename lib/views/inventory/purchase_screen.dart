@@ -9,18 +9,23 @@ import '../../models/product_model.dart';
 import '../../models/purchase_model.dart';
 import '../../models/branch_model.dart';
 import '../../models/unit_conversion.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/ad_banner_widget.dart';
 
-/// Màn hình nhập kho
+/// Màn hình nhập kho (mobile/desktop theo platform).
 class PurchaseScreen extends StatefulWidget {
-  const PurchaseScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const PurchaseScreen({super.key, this.forceMobile});
 
   @override
   State<PurchaseScreen> createState() => _PurchaseScreenState();
 }
 
 class _PurchaseScreenState extends State<PurchaseScreen> {
+  bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
   final TextEditingController _barcodeController = TextEditingController();
   final TextEditingController _supplierNameController = TextEditingController();
 
@@ -313,7 +318,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       appBar: AppBar(
         title: const Text('Nhập kho'),
         actions: [
-          if (!isMobile(context))
+          if (!_useMobileLayout)
             IconButton(
               icon: const Icon(Icons.home),
               onPressed: () {

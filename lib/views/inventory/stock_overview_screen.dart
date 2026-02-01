@@ -4,22 +4,28 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/auth_provider.dart';
 import '../../controllers/product_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../models/product_model.dart';
 import '../../models/branch_model.dart';
 import '../../core/routes.dart';
+import '../../utils/platform_utils.dart';
 import '_stock_count_dialog.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/ad_banner_widget.dart';
 
 
+/// Màn hình quản lý tồn kho (mobile/desktop theo platform).
 class StockOverviewScreen extends StatelessWidget {
-  const StockOverviewScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const StockOverviewScreen({super.key, this.forceMobile});
 
   @override
   Widget build(BuildContext context) {
-    final bool useMobileLayout = isMobile(context);
+    final bool useMobileLayout = forceMobile ?? isMobilePlatform;
 
     return Scaffold(
       appBar: useMobileLayout
@@ -36,23 +42,44 @@ class StockOverviewScreen extends StatelessWidget {
               ],
             )
           : null,
-      body: const _StockOverviewContent(),
+      body: _StockOverviewContent(useMobileLayout: useMobileLayout),
     );
   }
 }
 
 class _StockOverviewContent extends StatefulWidget {
-  const _StockOverviewContent();
+  final bool useMobileLayout;
+
+  const _StockOverviewContent({required this.useMobileLayout});
 
   @override
   State<_StockOverviewContent> createState() => _StockOverviewContentState();
 }
 
 class _StockOverviewContentState extends State<_StockOverviewContent> {
-  String? _selectedBranchId; // null = tất cả chi nhánh
+  /// null = "Tất cả chi nhánh" (hiển thị product.stock = tổng). Mặc định = chi nhánh hiện tại để tránh nhảy số.
+  String? _selectedBranchId;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   String? _selectedCategoryId;
+  bool _hasInitializedBranch = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Mặc định chọn chi nhánh hiện tại để tồn kho hiển thị đúng ngay từ đầu (tránh hiện tổng rồi tụt về)
+    if (!_hasInitializedBranch) {
+      _hasInitializedBranch = true;
+      final branchProvider = context.read<BranchProvider>();
+      final current = branchProvider.currentBranchId;
+      if (current != null && current.isNotEmpty) {
+        _selectedBranchId = current;
+      } else if (branchProvider.branches.isNotEmpty) {
+        _selectedBranchId = branchProvider.branches.first.id;
+      }
+      // Nếu vẫn null, giữ nguyên (sẽ hiển thị "Tất cả" = product.stock)
+    }
+  }
 
   @override
   void dispose() {
@@ -75,7 +102,7 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobileLayout = isMobile(context);
+    final isMobileLayout = widget.useMobileLayout;
     final double maxWidth = isMobileLayout ? kContentMaxWidth : kBreakpointTablet;
 
     final headerAndCards = ResponsiveContainer(
@@ -145,14 +172,49 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
     );
 
     if (isMobileLayout) {
-      // Mobile: header + thẻ thống kê + danh sách cuộn được, ad cố định ở đáy (giống product_list_screen)
+      // Mobile: cố định chỉ 2 nút; dropdown + 2 thẻ thống kê + danh sách cuộn chung.
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          headerAndCards,
+          ResponsiveContainer(
+            maxWidth: maxWidth,
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 4, bottom: 12),
+            child: _HeaderSection(
+              isMobile: true,
+              selectedBranchId: _selectedBranchId,
+              onBranchChanged: (branchId) => setState(() => _selectedBranchId = branchId),
+              onStockCountPressed: () => _showStockCountDialog(context, _selectedBranchId),
+              showBranchDropdown: false,
+            ),
+          ),
           Expanded(
             child: SingleChildScrollView(
-              child: tableSection,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ResponsiveContainer(
+                    maxWidth: maxWidth,
+                    padding: const EdgeInsets.only(left: 16, right: 16, top: 0, bottom: 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _BranchDropdownBar(
+                          selectedBranchId: _selectedBranchId,
+                          onBranchChanged: (branchId) =>
+                              setState(() => _selectedBranchId = branchId),
+                        ),
+                        const SizedBox(height: 12),
+                        _SummaryCards(
+                          selectedBranchId: _selectedBranchId,
+                          isMobile: true,
+                          compact: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                  tableSection,
+                ],
+              ),
             ),
           ),
           const SafeArea(top: false, child: AdBannerWidget()),
@@ -195,6 +257,8 @@ class _HeaderSection extends StatelessWidget {
   final ValueChanged<String>? onSearchChanged;
   final String? selectedCategoryId;
   final ValueChanged<String?>? onCategoryChanged;
+  /// Trên mobile: false = chỉ hiện 2 nút (dropdown đưa vào vùng cuộn).
+  final bool showBranchDropdown;
 
   const _HeaderSection({
     required this.isMobile,
@@ -205,6 +269,7 @@ class _HeaderSection extends StatelessWidget {
     this.onSearchChanged,
     this.selectedCategoryId,
     this.onCategoryChanged,
+    this.showBranchDropdown = true,
   });
 
   @override
@@ -226,6 +291,13 @@ class _HeaderSection extends StatelessWidget {
                 ),
               ),
             ];
+            
+            // Đảm bảo selectedBranchId hợp lệ (null hoặc có trong danh sách branches)
+            final validValue = selectedBranchId == null || 
+                               branches.any((b) => b.id == selectedBranchId)
+                ? selectedBranchId
+                : null;
+            
             return SizedBox(
               width: isMobile ? double.infinity : 200,
               child: Container(
@@ -236,7 +308,7 @@ class _HeaderSection extends StatelessWidget {
                   border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 child: DropdownButton<String?>(
-                  value: selectedBranchId,
+                  value: validValue,
                   isExpanded: true,
                   underline: const SizedBox(),
                   items: items,
@@ -289,7 +361,7 @@ class _HeaderSection extends StatelessWidget {
       ],
     );
 
-    // Mobile: Hai nút ngay dưới AppBar (bỏ khoảng trống), dropdown chi nhánh bên dưới.
+    // Mobile: chỉ 2 nút cố định; dropdown chi nhánh đưa vào vùng cuộn khi showBranchDropdown = false.
     if (isMobile) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -318,8 +390,10 @@ class _HeaderSection extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          actions,
+          if (showBranchDropdown) ...[
+            const SizedBox(height: 8),
+            actions,
+          ],
         ],
       );
     }
@@ -413,13 +487,60 @@ class _HeaderSection extends StatelessWidget {
   }
 }
 
+/// Dropdown chi nhánh dùng trong vùng cuộn (mobile).
+class _BranchDropdownBar extends StatelessWidget {
+  final String? selectedBranchId;
+  final ValueChanged<String?> onBranchChanged;
+
+  const _BranchDropdownBar({
+    required this.selectedBranchId,
+    required this.onBranchChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<BranchProvider>(
+      builder: (context, branchProvider, child) {
+        final branches = branchProvider.branches.where((b) => b.isActive).toList();
+        final items = <DropdownMenuItem<String?>>[
+          const DropdownMenuItem<String?>(value: null, child: Text('Tất cả chi nhánh')),
+          ...branches.map(
+            (b) => DropdownMenuItem<String?>(value: b.id, child: Text(b.name)),
+          ),
+        ];
+        return SizedBox(
+          width: double.infinity,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: DropdownButton<String?>(
+              value: selectedBranchId,
+              isExpanded: true,
+              underline: const SizedBox(),
+              items: items,
+              onChanged: onBranchChanged,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _SummaryCards extends StatelessWidget {
   final String? selectedBranchId;
   final bool isMobile;
+  /// true = chỉ 2 thẻ: Tổng số mặt hàng, Tổng giá trị tồn kho (mobile trong vùng cuộn).
+  final bool compact;
 
   const _SummaryCards({
     required this.selectedBranchId,
     this.isMobile = false,
+    this.compact = false,
   });
 
   static double _getStockForProduct(ProductModel product, String? branchId) {
@@ -485,18 +606,20 @@ class _SummaryCards extends StatelessWidget {
                   symbol: '₫',
                 ).format(totalInventoryValue),
               ),
-              _DashboardStatCell(
-                icon: Icons.category,
-                iconColor: const Color(0xFF7C3AED),
-                label: 'Tổng nhóm hàng',
-                value: categoryCount.toString(),
-              ),
-              _DashboardStatCell(
-                icon: Icons.warning_amber_rounded,
-                iconColor: const Color(0xFFDC2626),
-                label: 'Sản phẩm cần bổ sung',
-                value: lowStockCount.toString(),
-              ),
+              if (!compact) ...[
+                _DashboardStatCell(
+                  icon: Icons.category,
+                  iconColor: const Color(0xFF7C3AED),
+                  label: 'Tổng nhóm hàng',
+                  value: categoryCount.toString(),
+                ),
+                _DashboardStatCell(
+                  icon: Icons.warning_amber_rounded,
+                  iconColor: const Color(0xFFDC2626),
+                  label: 'Sản phẩm cần bổ sung',
+                  value: lowStockCount.toString(),
+                ),
+              ],
             ],
           ),
         );
@@ -1088,7 +1211,7 @@ class _InventoryTable extends StatelessWidget {
   static String _getStockStatus(double stock, double minStock) {
     if (stock == 0) return 'Hết hàng';
     if (minStock <= 0) return 'An toàn';
-    if (stock <= minStock) return 'Sắp hết';
+    if (stock < minStock) return 'Sắp hết'; // Chỉ cảnh báo khi tồn kho THẤP HƠN định mức
     return 'An toàn';
   }
 
@@ -1338,6 +1461,36 @@ class _ProductDetailBottomSheetState extends State<_ProductDetailBottomSheet> {
   }
 
   Future<void> _quickAdjustStock() async {
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.allowQuickStockUpdate) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cập nhật tồn kho'),
+          content: const Text(
+            "Tính năng cập nhật nhanh đã bị tắt. Vui lòng sử dụng 'Phiếu nhập kho' để điều chỉnh số lượng.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Đóng'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                navigator.pushNamed(AppRoutes.purchase);
+              },
+              child: const Text('Đến Phiếu nhập kho'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final newStockText = _adjustStockController.text.trim();
     if (newStockText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1539,46 +1692,90 @@ class _ProductDetailBottomSheetState extends State<_ProductDetailBottomSheet> {
                     ),
                     const SizedBox(height: 24),
                   ],
-                  // Quick Adjust
-                  Text(
-                    'Điều chỉnh nhanh',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _adjustStockController,
-                    decoration: InputDecoration(
-                      labelText: 'Số lượng mới',
-                      hintText: currentStock.toStringAsFixed(0),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      prefixIcon: const Icon(Icons.inventory_2),
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _isAdjusting ? null : _quickAdjustStock,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue.shade600,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _isAdjusting
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Cập nhật tồn kho'),
+                  // Quick Adjust (tuân theo cài đặt allowQuickStockUpdate)
+                  Consumer<AuthProvider>(
+                    builder: (context, authProvider, _) {
+                      final allowQuick = authProvider.allowQuickStockUpdate;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'Điều chỉnh nhanh',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (allowQuick) ...[
+                            TextField(
+                              controller: _adjustStockController,
+                              decoration: InputDecoration(
+                                labelText: 'Số lượng mới',
+                                hintText: currentStock.toStringAsFixed(0),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                prefixIcon: const Icon(Icons.inventory_2),
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: _isAdjusting ? null : _quickAdjustStock,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue.shade600,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: _isAdjusting
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Text('Cập nhật tồn kho'),
+                            ),
+                          ] else ...[
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.orange.shade200),
+                              ),
+                              child: Text(
+                                "Tính năng cập nhật nhanh đã bị tắt. Vui lòng sử dụng 'Phiếu nhập kho' để điều chỉnh số lượng.",
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                final navigator = Navigator.of(context);
+                                navigator.pop();
+                                navigator.pushNamed(AppRoutes.purchase);
+                              },
+                              icon: const Icon(Icons.inventory, size: 18),
+                              label: const Text('Đến Phiếu nhập kho'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 24),
                   // Transaction History (Placeholder)

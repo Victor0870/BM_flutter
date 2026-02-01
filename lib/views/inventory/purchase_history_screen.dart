@@ -5,10 +5,14 @@ import '../../controllers/auth_provider.dart';
 import '../../services/purchase_service.dart';
 import '../../services/product_service.dart';
 import '../../models/purchase_model.dart';
+import '../../utils/platform_utils.dart';
 
-/// Màn hình lịch sử nhập kho
+/// Màn hình lịch sử nhập kho (mobile/desktop theo platform).
 class PurchaseHistoryScreen extends StatefulWidget {
-  const PurchaseHistoryScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform]. Hiện chưa có layout khác biệt.
+  final bool? forceMobile;
+
+  const PurchaseHistoryScreen({super.key, this.forceMobile});
 
   @override
   State<PurchaseHistoryScreen> createState() => _PurchaseHistoryScreenState();

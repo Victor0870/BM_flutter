@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/customer_provider.dart';
 import '../../models/customer_group_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 
-/// Màn hình quản lý nhóm khách hàng
+/// Màn hình quản lý nhóm khách hàng (mobile/desktop theo platform).
 class CustomerGroupManagementScreen extends StatefulWidget {
-  const CustomerGroupManagementScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const CustomerGroupManagementScreen({super.key, this.forceMobile});
 
   @override
   State<CustomerGroupManagementScreen> createState() => _CustomerGroupManagementScreenState();

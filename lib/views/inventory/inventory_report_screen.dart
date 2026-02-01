@@ -1,6 +1,3 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -8,26 +5,29 @@ import 'package:provider/provider.dart';
 import '../../controllers/product_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../models/inventory_report_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/ad_banner_widget.dart';
 
-
+/// Màn hình báo cáo Xuất - Nhập - Tồn (mobile/desktop theo platform).
 class InventoryReportScreen extends StatefulWidget {
-  const InventoryReportScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const InventoryReportScreen({super.key, this.forceMobile});
 
   @override
   State<InventoryReportScreen> createState() => _InventoryReportScreenState();
 }
 
 class _InventoryReportScreenState extends State<InventoryReportScreen> {
+  bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
   DateTime _startDate = DateTime.now().copyWith(day: 1); // Ngày đầu tháng
   DateTime _endDate = DateTime.now(); // Hôm nay
   String? _selectedBranchId;
   InventoryReport? _report;
   bool _isLoading = false;
   String? _errorMessage;
-
-  bool _isMobileLayout(BuildContext context) => isMobile(context);
 
   void _showDateRangeBottomSheet() {
     final dateFormat = DateFormat('dd/MM/yyyy');
@@ -107,13 +107,11 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDesktop =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    final double maxWidth = isDesktop ? kBreakpointTablet : kContentMaxWidth;
-    final isMobile = _isMobileLayout(context);
+    final isMobile = _useMobileLayout;
+    final double maxWidth = isDesktopPlatform ? kBreakpointTablet : kContentMaxWidth;
 
     return Scaffold(
-      appBar: isDesktop
+      appBar: isDesktopPlatform
           ? null
           : AppBar(
               title: const Text('Báo cáo Xuất - Nhập - Tồn'),

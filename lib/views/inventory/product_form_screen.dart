@@ -6,21 +6,25 @@ import '../../controllers/auth_provider.dart';
 import '../../models/product_model.dart';
 import '../../models/unit_conversion.dart';
 import '../../models/category_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/ad_banner_widget.dart';
 
 
-/// Màn hình thêm/sửa sản phẩm
+/// Màn hình thêm/sửa sản phẩm (mobile/desktop theo platform).
 class ProductFormScreen extends StatefulWidget {
   final ProductModel? product;
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
 
-  const ProductFormScreen({super.key, this.product});
+  const ProductFormScreen({super.key, this.product, this.forceMobile});
 
   @override
   State<ProductFormScreen> createState() => _ProductFormScreenState();
 }
 
 class _ProductFormScreenState extends State<ProductFormScreen> {
+  bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _unitController = TextEditingController();
@@ -720,7 +724,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.product != null;
-    final useMobileLayout = isMobile(context);
+    final useMobileLayout = _useMobileLayout;
 
     return Scaffold(
       appBar: AppBar(

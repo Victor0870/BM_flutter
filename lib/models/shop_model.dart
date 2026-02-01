@@ -152,6 +152,9 @@ class ShopModel {
   // Cấu hình cập nhật tồn kho
   final bool allowQuickStockUpdate; // Cho phép cập nhật nhanh tồn kho tại danh sách (mặc định true)
   
+  /// Thuế VAT (%) áp dụng cho hóa đơn bán hàng (0 = không thuế)
+  final double vatRate;
+
   // Các trường khác có thể có
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -175,6 +178,7 @@ class ShopModel {
     this.enableCostPrice = true,
     this.allowRegistration = false,
     this.allowQuickStockUpdate = true,
+    this.vatRate = 0.0,
     this.createdAt,
     this.updatedAt,
     this.settings,
@@ -220,6 +224,7 @@ class ShopModel {
       enableCostPrice: data['enableCostPrice'] ?? true,
       allowRegistration: data['allowRegistration'] ?? false,
       allowQuickStockUpdate: data['allowQuickStockUpdate'] ?? true,
+      vatRate: (data['vatRate'] as num?)?.toDouble() ?? 0.0,
       settings: data['settings'] != null
           ? Map<String, dynamic>.from(data['settings'])
           : null,
@@ -258,6 +263,7 @@ class ShopModel {
       enableCostPrice: json['enableCostPrice'] ?? true,
       allowRegistration: json['allowRegistration'] ?? false,
       allowQuickStockUpdate: json['allowQuickStockUpdate'] ?? true,
+      vatRate: (json['vatRate'] as num?)?.toDouble() ?? 0.0,
       settings: json['settings'] != null
           ? Map<String, dynamic>.from(json['settings'])
           : null,
@@ -284,6 +290,7 @@ class ShopModel {
       'enableCostPrice': enableCostPrice,
       'allowRegistration': allowRegistration,
       'allowQuickStockUpdate': allowQuickStockUpdate,
+      'vatRate': vatRate,
       'createdAt': createdAt?.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'settings': settings,
@@ -311,6 +318,7 @@ class ShopModel {
       'enableCostPrice': enableCostPrice,
       'allowRegistration': allowRegistration,
       'allowQuickStockUpdate': allowQuickStockUpdate,
+      'vatRate': vatRate,
       'createdAt': createdAt != null
           ? Timestamp.fromDate(createdAt!)
           : null,
@@ -349,6 +357,7 @@ class ShopModel {
     bool? enableCostPrice,
     bool? allowRegistration,
     bool? allowQuickStockUpdate,
+    double? vatRate,
     DateTime? createdAt,
     DateTime? updatedAt,
     Map<String, dynamic>? settings,
@@ -371,6 +380,7 @@ class ShopModel {
       enableCostPrice: enableCostPrice ?? this.enableCostPrice,
       allowRegistration: allowRegistration ?? this.allowRegistration,
       allowQuickStockUpdate: allowQuickStockUpdate ?? this.allowQuickStockUpdate,
+      vatRate: vatRate ?? this.vatRate,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       settings: settings ?? this.settings,

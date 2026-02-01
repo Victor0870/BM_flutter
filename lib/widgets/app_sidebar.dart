@@ -56,6 +56,12 @@ class _AppSidebarState extends State<AppSidebar> {
     _isCustomersExpanded = false;
     _isStaffExpanded = false;
     _isReportsExpanded = false;
+    _selectedMenuGroup = null; // Reset selected menu group
+    
+    // Nếu đang ở trang home (dashboard), không highlight menu nào
+    if (activeRoute == AppRoutes.home) {
+      return;
+    }
     
     // Tự động mở menu Orders nếu đang ở route của submenu Orders
     if (activeRoute == AppRoutes.salesHistory ||
@@ -352,17 +358,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'orders';
-              
               if (!_isOrdersExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'orders';
                 _isOrdersExpanded = true;
                 _collapseAllExcept('orders');
                 _handleMenuTap(AppRoutes.salesHistory);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isOrdersExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },
@@ -487,17 +492,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'products';
-              
               if (!_isProductsExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'products';
                 _isProductsExpanded = true;
                 _collapseAllExcept('products');
                 _handleMenuTap(AppRoutes.inventory);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isProductsExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },
@@ -582,17 +586,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'inventory';
-              
               if (!_isInventoryExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'inventory';
                 _isInventoryExpanded = true;
                 _collapseAllExcept('inventory');
                 _handleMenuTap(AppRoutes.stockOverview);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isInventoryExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },
@@ -675,17 +678,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'customers';
-              
               if (!_isCustomersExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'customers';
                 _isCustomersExpanded = true;
                 _collapseAllExcept('customers');
                 _handleMenuTap(AppRoutes.customerManagement);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isCustomersExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },
@@ -754,17 +756,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'staff';
-              
               if (!_isStaffExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'staff';
                 _isStaffExpanded = true;
                 _collapseAllExcept('staff');
                 _handleMenuTap(AppRoutes.employeeManagement);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isStaffExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },
@@ -837,17 +838,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'reports';
-              
               if (!_isReportsExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'reports';
                 _isReportsExpanded = true;
                 _collapseAllExcept('reports');
                 _handleMenuTap(AppRoutes.salesReport);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isReportsExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },
@@ -939,17 +939,16 @@ class _AppSidebarState extends State<AppSidebar> {
         InkWell(
           onTap: () {
             setState(() {
-              // Highlight menu ngay khi bấm vào
-              _selectedMenuGroup = 'settings';
-              
               if (!_isSettingsExpanded) {
                 // Nếu chưa expand, expand và navigate đến route đầu tiên
+                _selectedMenuGroup = 'settings';
                 _isSettingsExpanded = true;
                 _collapseAllExcept('settings');
                 _handleMenuTap(AppRoutes.shopSettings);
               } else {
-                // Nếu đã expand, chỉ collapse
+                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isSettingsExpanded = false;
+                _selectedMenuGroup = null;
               }
             });
           },

@@ -51,6 +51,19 @@ service cloud.firestore {
       }
     }
 
+    // Collection notifications (root): owner hoặc staff của shop có thể đọc
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && (
+        resource.data.shopId == request.auth.uid
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.shopId == request.auth.uid
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId
+      );
+    }
+
     // Deny tất cả các truy cập khác
     match /{document=**} {
       allow read, write: if false;

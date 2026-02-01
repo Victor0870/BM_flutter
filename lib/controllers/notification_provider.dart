@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/notification_model.dart';
+import '../utils/platform_utils.dart';
 import 'auth_provider.dart';
 
 /// Provider quản lý thông báo real-time từ Firestore.
@@ -43,6 +44,14 @@ class NotificationProvider with ChangeNotifier {
 
   void _startListening(String shopId) {
     _cancelSubscription();
+
+    // Trên Windows/desktop: Firestore stream gây lỗi platform channel.
+    // Tạm bỏ qua stream để tránh spam log; dùng danh sách rỗng.
+    if (isDesktopPlatform) {
+      _notifications = [];
+      _safeNotifyListeners();
+      return;
+    }
 
     final stream = FirebaseFirestore.instance
         .collection('notifications')

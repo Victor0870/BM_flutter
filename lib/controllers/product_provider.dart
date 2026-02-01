@@ -623,8 +623,8 @@ class ProductProvider with ChangeNotifier {
 
       switch (filterType) {
         case 'low_stock':
-          // Sắp hết: tồn kho <= minStock và > 0
-          return stock > 0 && stock <= minStock;
+          // Sắp hết: tồn kho < minStock và > 0 (chỉ cảnh báo khi THẤP HƠN định mức)
+          return stock > 0 && stock < minStock;
         case 'out_of_stock':
           // Hết hàng: tồn kho <= 0
           return stock <= 0;

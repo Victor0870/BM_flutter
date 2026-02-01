@@ -1,3 +1,5 @@
+import 'dart:io' show File, Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -6,17 +8,20 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'dart:io' show File, Platform;
 import '../../controllers/sales_return_provider.dart';
+import '../../utils/platform_utils.dart';
 import '../../controllers/branch_provider.dart';
 import '../../controllers/customer_provider.dart';
 import '../../models/sales_return_model.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/date_range_filter.dart';
 
-/// Màn hình báo cáo tổng hợp hàng trả
+/// Màn hình báo cáo tổng hợp hàng trả (mobile/desktop theo platform).
 class SalesReturnReportScreen extends StatefulWidget {
-  const SalesReturnReportScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const SalesReturnReportScreen({super.key, this.forceMobile});
 
   @override
   State<SalesReturnReportScreen> createState() => _SalesReturnReportScreenState();
@@ -212,12 +217,10 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDesktop =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    final double maxWidth = isDesktop ? 1200 : 800;
+    final double maxWidth = isDesktopPlatform ? 1200 : 800;
 
     return Scaffold(
-      appBar: isDesktop
+      appBar: isDesktopPlatform
           ? null
           : AppBar(
               title: const Text('Báo cáo hàng trả'),

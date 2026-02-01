@@ -61,6 +61,10 @@ class SaleModel {
   final double? totalDiscountAmount; // Số tiền thực tế được giảm sau khi quy đổi từ % hoặc tiền mặt
   final String? discountApprovedBy; // ID hoặc tên người đã phê duyệt mức chiết khấu này (nếu mức chiết khấu cao)
   
+  // Thuế VAT áp dụng cho đơn hàng
+  final double? vatRate; // Thuế suất (%)
+  final double? taxAmount; // Số tiền thuế
+
   // Thông tin hóa đơn điện tử (FPT eInvoice)
   final String? invoiceNo; // Số hóa đơn điện tử
   final String? templateCode; // Mẫu số hóa đơn
@@ -91,6 +95,8 @@ class SaleModel {
     this.orderDiscountType, // Loại chiết khấu
     this.totalDiscountAmount, // Số tiền thực tế được giảm
     this.discountApprovedBy, // Người phê duyệt
+    this.vatRate, // Thuế suất (%)
+    this.taxAmount, // Số tiền thuế
     this.invoiceNo, // Số hóa đơn điện tử
     this.templateCode, // Mẫu số hóa đơn
     this.invoiceSerial, // Ký hiệu hóa đơn
@@ -126,6 +132,8 @@ class SaleModel {
       orderDiscountType: data['orderDiscountType'] as String?,
       totalDiscountAmount: data['totalDiscountAmount'] != null ? (data['totalDiscountAmount'] as num).toDouble() : null,
       discountApprovedBy: data['discountApprovedBy'] as String?,
+      vatRate: data['vatRate'] != null ? (data['vatRate'] as num).toDouble() : null,
+      taxAmount: data['taxAmount'] != null ? (data['taxAmount'] as num).toDouble() : null,
       invoiceNo: data['invoiceNo'] as String?,
       templateCode: data['templateCode'] as String?,
       invoiceSerial: data['invoiceSerial'] as String?,
@@ -162,6 +170,8 @@ class SaleModel {
       orderDiscountType: json['orderDiscountType'] as String?,
       totalDiscountAmount: json['totalDiscountAmount'] != null ? (json['totalDiscountAmount'] as num).toDouble() : null,
       discountApprovedBy: json['discountApprovedBy'] as String?,
+      vatRate: json['vatRate'] != null ? (json['vatRate'] as num).toDouble() : null,
+      taxAmount: json['taxAmount'] != null ? (json['taxAmount'] as num).toDouble() : null,
       invoiceNo: json['invoiceNo'] as String?,
       templateCode: json['templateCode'] as String?,
       invoiceSerial: json['invoiceSerial'] as String?,
@@ -197,6 +207,8 @@ class SaleModel {
       orderDiscountType: map['orderDiscountType'] as String?,
       totalDiscountAmount: map['totalDiscountAmount'] != null ? (map['totalDiscountAmount'] as num).toDouble() : null,
       discountApprovedBy: map['discountApprovedBy'] as String?,
+      vatRate: map['vatRate'] != null ? (map['vatRate'] as num).toDouble() : null,
+      taxAmount: map['taxAmount'] != null ? (map['taxAmount'] as num).toDouble() : null,
       invoiceNo: map['invoiceNo'] as String?,
       templateCode: map['templateCode'] as String?,
       invoiceSerial: map['invoiceSerial'] as String?,
@@ -230,6 +242,8 @@ class SaleModel {
       'orderDiscountType': orderDiscountType,
       'totalDiscountAmount': totalDiscountAmount,
       'discountApprovedBy': discountApprovedBy,
+      'vatRate': vatRate,
+      'taxAmount': taxAmount,
     };
   }
 
@@ -258,6 +272,8 @@ class SaleModel {
       'orderDiscountType': orderDiscountType,
       'totalDiscountAmount': totalDiscountAmount,
       'discountApprovedBy': discountApprovedBy,
+      'vatRate': vatRate,
+      'taxAmount': taxAmount,
       'invoiceNo': invoiceNo,
       'templateCode': templateCode,
       'invoiceSerial': invoiceSerial,
@@ -291,6 +307,8 @@ class SaleModel {
       'orderDiscountType': orderDiscountType,
       'totalDiscountAmount': totalDiscountAmount,
       'discountApprovedBy': discountApprovedBy,
+      'vatRate': vatRate,
+      'taxAmount': taxAmount,
       'invoiceNo': invoiceNo,
       'templateCode': templateCode,
       'invoiceSerial': invoiceSerial,
@@ -323,6 +341,8 @@ class SaleModel {
     String? orderDiscountType,
     double? totalDiscountAmount,
     String? discountApprovedBy,
+    double? vatRate,
+    double? taxAmount,
     String? invoiceNo,
     String? templateCode,
     String? invoiceSerial,
@@ -352,6 +372,8 @@ class SaleModel {
       orderDiscountType: orderDiscountType ?? this.orderDiscountType,
       totalDiscountAmount: totalDiscountAmount ?? this.totalDiscountAmount,
       discountApprovedBy: discountApprovedBy ?? this.discountApprovedBy,
+      vatRate: vatRate ?? this.vatRate,
+      taxAmount: taxAmount ?? this.taxAmount,
       invoiceNo: invoiceNo ?? this.invoiceNo,
       templateCode: templateCode ?? this.templateCode,
       invoiceSerial: invoiceSerial ?? this.invoiceSerial,

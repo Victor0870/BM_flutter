@@ -4,10 +4,14 @@ import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../models/user_model.dart';
 import '../../services/firebase_service.dart';
+import '../../utils/platform_utils.dart';
 
-/// Màn hình danh sách nhân viên & điều khiển allowRegistration
+/// Màn hình danh sách nhân viên & điều khiển allowRegistration (mobile/desktop theo platform).
 class EmployeeManagementScreen extends StatefulWidget {
-  const EmployeeManagementScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const EmployeeManagementScreen({super.key, this.forceMobile});
 
   @override
   State<EmployeeManagementScreen> createState() =>

@@ -11,16 +11,20 @@ import '../../services/sales_service.dart';
 import '../../services/sales_return_service.dart';
 import '../../services/product_service.dart';
 import '../../services/customer_service.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import 'sales_history_screen.dart';
 
-/// Màn hình tạo hóa đơn trả hàng
+/// Màn hình tạo hóa đơn trả hàng (mobile/desktop theo platform).
 class SalesReturnFormScreen extends StatefulWidget {
   final String? preSelectedSaleId; // ID hóa đơn được chọn sẵn từ màn hình chi tiết
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
 
   const SalesReturnFormScreen({
     super.key,
     this.preSelectedSaleId,
+    this.forceMobile,
   });
 
   @override

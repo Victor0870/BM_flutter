@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/product_provider.dart';
 import '../../models/category_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 
-/// Màn hình quản lý nhóm hàng (Category)
+/// Màn hình quản lý nhóm hàng (mobile/desktop theo platform).
 class CategoryManagementScreen extends StatefulWidget {
-  const CategoryManagementScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const CategoryManagementScreen({super.key, this.forceMobile});
 
   @override
   State<CategoryManagementScreen> createState() => _CategoryManagementScreenState();

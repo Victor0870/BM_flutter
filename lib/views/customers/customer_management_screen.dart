@@ -2,20 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/customer_provider.dart';
 import '../../models/customer_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../core/routes.dart';
 import 'customer_form_screen.dart';
 import 'customer_detail_screen.dart';
 
-/// Màn hình quản lý khách hàng
+/// Màn hình quản lý khách hàng (mobile/desktop theo platform).
 class CustomerManagementScreen extends StatefulWidget {
-  const CustomerManagementScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const CustomerManagementScreen({super.key, this.forceMobile});
 
   @override
   State<CustomerManagementScreen> createState() => _CustomerManagementScreenState();
 }
 
 class _CustomerManagementScreenState extends State<CustomerManagementScreen> {
+  bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
+
   final TextEditingController _searchController = TextEditingController();
   String? _selectedGroupId; // Filter theo nhóm
 
@@ -270,7 +276,7 @@ class _CustomerManagementScreenState extends State<CustomerManagementScreen> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => CustomerDetailScreen(customer: customer),
+                                  builder: (context) => CustomerDetailScreen(customer: customer, forceMobile: _useMobileLayout),
                                 ),
                               );
                             },
@@ -290,7 +296,7 @@ class _CustomerManagementScreenState extends State<CustomerManagementScreen> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => const CustomerFormScreen(),
+              builder: (context) => CustomerFormScreen(forceMobile: _useMobileLayout),
             ),
           );
         },

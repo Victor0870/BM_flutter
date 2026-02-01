@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../models/branch_model.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 
-/// Màn hình quản lý chi nhánh (Branch)
+/// Màn hình quản lý chi nhánh (mobile/desktop theo platform).
 class BranchManagementScreen extends StatefulWidget {
-  const BranchManagementScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const BranchManagementScreen({super.key, this.forceMobile});
 
   @override
   State<BranchManagementScreen> createState() => _BranchManagementScreenState();

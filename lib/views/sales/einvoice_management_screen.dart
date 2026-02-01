@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -10,15 +8,18 @@ import '../../controllers/branch_provider.dart';
 import '../../services/sales_service.dart';
 import '../../services/einvoice_service.dart';
 import '../../services/firebase_service.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/date_range_filter.dart';
 import 'sale_detail_screen.dart';
 
-/// Màn hình quản lý hóa đơn điện tử
 /// Liệt kê các hóa đơn đã bán, hiển thị trạng thái HĐĐT (Đã xuất/Chưa xuất)
 /// Cho phép phát hành hàng loạt và xem PDF
 class EinvoiceManagementScreen extends StatefulWidget {
-  const EinvoiceManagementScreen({super.key});
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
+
+  const EinvoiceManagementScreen({super.key, this.forceMobile});
 
   @override
   State<EinvoiceManagementScreen> createState() => _EinvoiceManagementScreenState();
@@ -268,12 +269,11 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDesktop =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    final double maxWidth = isDesktop ? 1200 : 800;
+    final useMobile = widget.forceMobile ?? isMobilePlatform;
+    final double maxWidth = useMobile ? 800 : 1200;
 
     return Scaffold(
-      appBar: isDesktop
+      appBar: isDesktopPlatform
           ? null
           : AppBar(
               title: const Text('Quản lý hóa đơn điện tử'),

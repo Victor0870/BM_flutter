@@ -1,27 +1,25 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../core/routes.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 
-/// Màn hình dùng chung hiển thị thông báo "Tính năng đang được phát triển"
+/// Màn hình dùng chung hiển thị thông báo "Tính năng đang được phát triển" (mobile/desktop theo platform).
 class FeatureComingSoonScreen extends StatelessWidget {
   final String title;
+  /// Nếu null: dùng [isMobilePlatform].
+  final bool? forceMobile;
 
   const FeatureComingSoonScreen({
     super.key,
     required this.title,
+    this.forceMobile,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bool isDesktop =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-
     return Scaffold(
-      appBar: isDesktop
+      appBar: isDesktopPlatform
           ? null
           : AppBar(
               title: Text(title),
