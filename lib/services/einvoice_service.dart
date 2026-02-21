@@ -1,60 +1,34 @@
-import 'dart:convert';
-import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:dio/dio.dart';
 import '../models/sale_model.dart';
 import '../models/shop_model.dart';
-import '../services/sales_service.dart';
-import 'einvoice_data_service.dart';
+import 'sales_service.dart';
+import 'einvoice/base_einvoice_provider.dart';
+import 'einvoice/fpt_invoice_provider.dart';
+import 'einvoice/viettel_invoice_provider.dart';
+import 'einvoice/misa_invoice_provider.dart';
 
-/// Service để gửi yêu cầu tạo hóa đơn điện tử đến FPT
-/// Theo tài liệu API của FPT eInvoice: API cua FPT.pdf
+/// Factory service hóa đơn điện tử: chọn đúng Provider (FPT, Viettel, sau này MISA) theo cấu hình Shop.
+/// Chỉ validate và delegate; logic nằm trong từng Provider.
 class EinvoiceService {
-  final Dio _dio;
+  final Dio _dio = Dio();
 
-  EinvoiceService() : _dio = Dio();
-
-  /// Lấy access token từ FPT API
-  /// API: https://api-uat.einvoice.fpt.com.vn/c_signin (hoặc production URL)
-  Future<String?> _getAccessToken({
-    required String username,
-    required String password,
-    required String baseUrl,
-  }) async {
-    try {
-      // Xác định URL signin (từ baseUrl)
-      final signinUrl = baseUrl.replaceAll('/api/invoice', '/c_signin');
-      
-      final response = await _dio.post(
-        signinUrl,
-        data: {
-          'username': username,
-          'password': password,
-        },
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = response.data;
-        if (responseData is Map<String, dynamic>) {
-          return responseData['access_token'] ?? responseData['data']?['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error getting access token: $e');
-      }
-      return null;
+  /// Trả về Provider tương ứng với nhà cung cấp trong cấu hình shop.
+  BaseEinvoiceProvider _getProvider(ShopModel shop) {
+    final config = shop.einvoiceConfig;
+    if (config == null) {
+      throw Exception('Chưa cấu hình thông tin hóa đơn điện tử. Vui lòng cài đặt trong Settings.');
+    }
+    switch (config.provider) {
+      case EinvoiceProvider.fpt:
+        return FptInvoiceProvider(_dio);
+      case EinvoiceProvider.viettel:
+        return ViettelInvoiceProvider(_dio);
+      case EinvoiceProvider.misa:
+        return MisaInvoiceProvider(_dio);
     }
   }
 
-  /// Gửi yêu cầu tạo/phát hành hóa đơn điện tử
-  /// Trả về Map chứa thông tin hóa đơn: {invoiceNo, templateCode, invoiceSerial, link}
-  /// Throw exception nếu có lỗi
+  /// Phát hành hóa đơn điện tử (delegate tới đúng Provider).
   Future<Map<String, String>> createInvoice({
     required SaleModel sale,
     required ShopModel shop,
@@ -63,439 +37,108 @@ class EinvoiceService {
     if (shop.einvoiceConfig == null) {
       throw Exception('Chưa cấu hình thông tin hóa đơn điện tử. Vui lòng cài đặt trong Settings.');
     }
-
     if (shop.stax == null || shop.stax!.isEmpty) {
       throw Exception('Chưa cấu hình mã số thuế. Vui lòng cài đặt trong Settings.');
     }
-
     if (shop.serial == null || shop.serial!.isEmpty) {
       throw Exception('Chưa cấu hình ký hiệu hóa đơn. Vui lòng cài đặt trong Settings.');
     }
-
-    final config = shop.einvoiceConfig!;
-
-    try {
-      // Chuẩn bị payload
-      final payload = EinvoiceDataService.prepareFptPayload(
-        sale: sale,
-        shop: shop,
-      );
-
-      if (kDebugMode) {
-        debugPrint('📋 FPT Invoice Payload: ${jsonEncode(payload)}');
-      }
-
-      // Lấy access token nếu có (Bearer Token method)
-      String? accessToken;
-      String? authHeader;
-      
-      // Thử dùng Bearer Token trước
-      if (config.username.isNotEmpty && config.password.isNotEmpty) {
-        accessToken = await _getAccessToken(
-          username: config.username,
-          password: config.password,
-          baseUrl: config.baseUrl,
-        );
-        
-        if (accessToken != null) {
-          authHeader = 'Bearer $accessToken';
-        }
-      }
-      
-      // Nếu không có token, dùng Basic Auth
-      if (authHeader == null) {
-        final credentials = base64Encode(
-          utf8.encode('${config.username}:${config.password}'),
-        );
-        authHeader = 'Basic $credentials';
-      }
-
-      // Gửi request
-      final response = await _dio.post(
-        config.baseUrl,
-        data: payload,
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeader,
-          },
-          validateStatus: (status) => status! < 500, // Cho phép 400 để xử lý lỗi nghiệp vụ
-        ),
-      );
-
-      if (kDebugMode) {
-        debugPrint('📡 FPT Response Status: ${response.statusCode}');
-        debugPrint('📡 FPT Response Data: ${response.data}');
-      }
-
-      // Xử lý response
-      if (response.statusCode == 200) {
-        // Thành công
-        final responseData = response.data;
-        if (responseData is Map<String, dynamic>) {
-          // Lấy thông tin hóa đơn từ response
-          final data = responseData['data'] ?? responseData;
-          final invoiceNo = data['invoiceNo'] ?? data['no'] ?? '';
-          final templateCode = data['templateCode'] ?? data['form'] ?? '';
-          final invoiceSerial = data['invoiceSerial'] ?? data['serial'] ?? '';
-          final link = data['link'] ?? data['url'] ?? '';
-          
-          final invoiceInfo = <String, String>{};
-          if (invoiceNo.isNotEmpty) invoiceInfo['invoiceNo'] = invoiceNo;
-          if (templateCode.isNotEmpty) invoiceInfo['templateCode'] = templateCode;
-          if (invoiceSerial.isNotEmpty) invoiceInfo['invoiceSerial'] = invoiceSerial;
-          if (link.isNotEmpty) invoiceInfo['link'] = link;
-          
-          // Cập nhật SaleModel với thông tin hóa đơn
-          if (salesService != null && invoiceInfo.isNotEmpty) {
-            try {
-              final updatedSale = sale.copyWith(
-                invoiceNo: invoiceInfo['invoiceNo'],
-                templateCode: invoiceInfo['templateCode'],
-                invoiceSerial: invoiceInfo['invoiceSerial'],
-                einvoiceUrl: invoiceInfo['link'],
-              );
-              await salesService.updateSale(updatedSale);
-              
-              if (kDebugMode) {
-                debugPrint('✅ SaleModel updated with invoice info: ${updatedSale.id}');
-              }
-            } catch (e) {
-              if (kDebugMode) {
-                debugPrint('⚠️ Error updating SaleModel with invoice info: $e');
-              }
-              // Không throw lỗi này vì hóa đơn đã được tạo thành công
-            }
-          }
-          
-          return invoiceInfo;
-        }
-        return {'message': 'Tạo hóa đơn thành công'};
-      } else if (response.statusCode == 400) {
-        // Lỗi nghiệp vụ
-        final responseData = response.data;
-        String errorMessage = 'Có lỗi khi tạo hóa đơn';
-        
-        if (responseData is Map<String, dynamic>) {
-          errorMessage = responseData['message'] ?? 
-                        responseData['error'] ?? 
-                        responseData['errors']?.toString() ?? 
-                        errorMessage;
-        } else if (responseData is String) {
-          errorMessage = responseData;
-        }
-
-        throw Exception(errorMessage);
-      } else {
-        // Lỗi khác
-        throw Exception('Lỗi kết nối đến hệ thống hóa đơn điện tử: ${response.statusCode}');
-      }
-    } on DioException catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ DioException: ${e.message}');
-        debugPrint('❌ Response: ${e.response?.data}');
-      }
-
-      if (e.response != null) {
-        final responseData = e.response!.data;
-        String errorMessage = 'Có lỗi khi tạo hóa đơn';
-
-        if (responseData is Map<String, dynamic>) {
-          errorMessage = responseData['message'] ?? 
-                        responseData['error'] ?? 
-                        responseData['errors']?.toString() ?? 
-                        errorMessage;
-        } else if (responseData is String) {
-          errorMessage = responseData;
-        }
-
-        throw Exception(errorMessage);
-      } else {
-        throw Exception('Không thể kết nối đến hệ thống hóa đơn điện tử: ${e.message}');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error creating invoice: $e');
-      }
-      rethrow;
-    }
+    final provider = _getProvider(shop);
+    return provider.createInvoice(sale: sale, shop: shop, salesService: salesService);
   }
 
-  /// Lấy link PDF hóa đơn điện tử
-  /// API: Tra cứu thông tin/lấy file hóa đơn
+  /// Lấy link PDF / tra cứu hóa đơn (delegate tới đúng Provider).
   Future<String> getInvoicePdfUrl(String saleId, ShopModel shop) async {
     if (shop.einvoiceConfig == null) {
       throw Exception('Chưa cấu hình thông tin hóa đơn điện tử');
     }
-
-    final config = shop.einvoiceConfig!;
-
-    try {
-      // Lấy access token
-      String? accessToken;
-      String? authHeader;
-      
-      if (config.username.isNotEmpty && config.password.isNotEmpty) {
-        accessToken = await _getAccessToken(
-          username: config.username,
-          password: config.password,
-          baseUrl: config.baseUrl,
-        );
-        
-        if (accessToken != null) {
-          authHeader = 'Bearer $accessToken';
-        }
-      }
-      
-      if (authHeader == null) {
-        final credentials = base64Encode(
-          utf8.encode('${config.username}:${config.password}'),
-        );
-        authHeader = 'Basic $credentials';
-      }
-
-      // Gọi API tra cứu hóa đơn
-      // URL: {baseUrl}/tra-cuu hoặc tương tự
-      final lookupUrl = config.baseUrl.replaceAll('/api/invoice', '/api/invoice/lookup');
-      
-      final response = await _dio.get(
-        '$lookupUrl/$saleId',
-        options: Options(
-          headers: {
-            'Authorization': authHeader,
-          },
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = response.data;
-        if (responseData is Map<String, dynamic>) {
-          final data = responseData['data'] ?? responseData;
-          return data['pdfUrl'] ?? data['link'] ?? data['url'] ?? '';
-        }
-      }
-
-      throw Exception('Không tìm thấy hóa đơn');
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error getting invoice PDF URL: $e');
-      }
-      rethrow;
-    }
+    final provider = _getProvider(shop);
+    return provider.getInvoicePdfUrl(saleId, shop);
   }
 
-  /// Hủy hóa đơn điện tử
-  /// Lưu vết biên bản thỏa thuận giữa hai bên
+  /// Hủy hóa đơn điện tử (delegate tới đúng Provider).
+  /// [invoiceIssueDateMs]: Ngày phát hành hóa đơn gốc (epoch ms). Bắt buộc khi dùng Viettel (sale.timestamp.millisecondsSinceEpoch).
   Future<Map<String, dynamic>> annulInvoice({
     required String invoiceId,
     required String reason,
     required ShopModel shop,
-    String? agreementDocument, // Biên bản thỏa thuận (có thể là text hoặc file path)
-    String? customerAgreement, // Xác nhận của khách hàng
+    String? agreementDocument,
+    String? customerAgreement,
+    int? invoiceIssueDateMs,
   }) async {
     if (shop.einvoiceConfig == null) {
       throw Exception('Chưa cấu hình thông tin hóa đơn điện tử');
     }
-
-    final config = shop.einvoiceConfig!;
-
-    try {
-      // Lấy access token
-      String? accessToken;
-      String? authHeader;
-      
-      if (config.username.isNotEmpty && config.password.isNotEmpty) {
-        accessToken = await _getAccessToken(
-          username: config.username,
-          password: config.password,
-          baseUrl: config.baseUrl,
-        );
-        
-        if (accessToken != null) {
-          authHeader = 'Bearer $accessToken';
-        }
-      }
-      
-      if (authHeader == null) {
-        final credentials = base64Encode(
-          utf8.encode('${config.username}:${config.password}'),
-        );
-        authHeader = 'Basic $credentials';
-      }
-
-      // Chuẩn bị payload hủy hóa đơn
-      final payload = {
-        'invoiceId': invoiceId,
-        'reason': reason,
-        'agreementDocument': agreementDocument ?? '',
-        'customerAgreement': customerAgreement ?? '',
-        'annulDate': DateTime.now().toIso8601String(),
-      };
-
-      // Gọi API hủy hóa đơn
-      final annulUrl = config.baseUrl.replaceAll('/api/invoice', '/api/invoice/annul');
-      
-      final response = await _dio.post(
-        annulUrl,
-        data: payload,
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeader,
-          },
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = response.data;
-        return {
-          'success': true,
-          'data': responseData,
-          'agreementDocument': agreementDocument,
-          'customerAgreement': customerAgreement,
-        };
-      }
-
-      throw Exception('Không thể hủy hóa đơn');
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error annulling invoice: $e');
-      }
-      rethrow;
-    }
+    final provider = _getProvider(shop);
+    return provider.annulInvoice(
+      invoiceId: invoiceId,
+      reason: reason,
+      shop: shop,
+      agreementDocument: agreementDocument,
+      customerAgreement: customerAgreement,
+      invoiceIssueDateMs: invoiceIssueDateMs,
+    );
   }
 
-  /// Phát hành hóa đơn thay thế
-  /// Lưu vết biên bản thỏa thuận giữa hai bên
+  /// Phát hành hóa đơn thay thế (delegate tới đúng Provider).
   Future<Map<String, String>> issueReplacementInvoice({
     required SaleModel originalSale,
     required SaleModel replacementSale,
     required ShopModel shop,
     required String reason,
     SalesService? salesService,
-    String? agreementDocument, // Biên bản thỏa thuận
-    String? customerAgreement, // Xác nhận của khách hàng
+    String? agreementDocument,
+    String? customerAgreement,
   }) async {
     if (shop.einvoiceConfig == null) {
       throw Exception('Chưa cấu hình thông tin hóa đơn điện tử');
     }
-
-    final config = shop.einvoiceConfig!;
-
-    try {
-      // Chuẩn bị payload hóa đơn thay thế
-      final payload = EinvoiceDataService.prepareFptPayload(
-        sale: replacementSale,
-        shop: shop,
-      );
-
-      // Thêm thông tin hóa đơn gốc và lý do thay thế
-      payload['originalInvoiceId'] = originalSale.invoiceNo ?? originalSale.id;
-      payload['replacementReason'] = reason;
-      payload['agreementDocument'] = agreementDocument ?? '';
-      payload['customerAgreement'] = customerAgreement ?? '';
-
-      if (kDebugMode) {
-        debugPrint('📋 FPT Replacement Invoice Payload: ${jsonEncode(payload)}');
-      }
-
-      // Lấy access token
-      String? accessToken;
-      String? authHeader;
-      
-      if (config.username.isNotEmpty && config.password.isNotEmpty) {
-        accessToken = await _getAccessToken(
-          username: config.username,
-          password: config.password,
-          baseUrl: config.baseUrl,
-        );
-        
-        if (accessToken != null) {
-          authHeader = 'Bearer $accessToken';
-        }
-      }
-      
-      if (authHeader == null) {
-        final credentials = base64Encode(
-          utf8.encode('${config.username}:${config.password}'),
-        );
-        authHeader = 'Basic $credentials';
-      }
-
-      // Gọi API phát hành hóa đơn thay thế
-      final replacementUrl = config.baseUrl.replaceAll('/api/invoice', '/api/invoice/replacement');
-      
-      final response = await _dio.post(
-        replacementUrl,
-        data: payload,
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeader,
-          },
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = response.data;
-        if (responseData is Map<String, dynamic>) {
-          final data = responseData['data'] ?? responseData;
-          final invoiceNo = data['invoiceNo'] ?? data['no'] ?? '';
-          final templateCode = data['templateCode'] ?? data['form'] ?? '';
-          final invoiceSerial = data['invoiceSerial'] ?? data['serial'] ?? '';
-          final link = data['link'] ?? data['url'] ?? '';
-          
-          final invoiceInfo = <String, String>{
-            'invoiceNo': invoiceNo,
-            'templateCode': templateCode,
-            'invoiceSerial': invoiceSerial,
-            'link': link,
-            'agreementDocument': agreementDocument ?? '',
-            'customerAgreement': customerAgreement ?? '',
-          };
-          
-          // Cập nhật SaleModel thay thế với thông tin hóa đơn
-          if (salesService != null && invoiceNo.isNotEmpty) {
-            try {
-              final updatedSale = replacementSale.copyWith(
-                invoiceNo: invoiceNo,
-                templateCode: templateCode,
-                invoiceSerial: invoiceSerial,
-                einvoiceUrl: link,
-              );
-              await salesService.updateSale(updatedSale);
-              
-              if (kDebugMode) {
-                debugPrint('✅ Replacement SaleModel updated with invoice info: ${updatedSale.id}');
-              }
-            } catch (e) {
-              if (kDebugMode) {
-                debugPrint('⚠️ Error updating replacement SaleModel: $e');
-              }
-            }
-          }
-          
-          return invoiceInfo;
-        }
-      }
-
-      throw Exception('Không thể phát hành hóa đơn thay thế');
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error issuing replacement invoice: $e');
-      }
-      rethrow;
-    }
+    final provider = _getProvider(shop);
+    return provider.issueReplacementInvoice(
+      originalSale: originalSale,
+      replacementSale: replacementSale,
+      shop: shop,
+      reason: reason,
+      salesService: salesService,
+      agreementDocument: agreementDocument,
+      customerAgreement: customerAgreement,
+    );
   }
 
-  /// Phát hành hàng loạt hóa đơn điện tử
+  /// Kiểm tra trạng thái hóa đơn (Viettel: tra cứu theo transactionUuid, cập nhật invoiceNo khi CQT đã cấp mã).
+  /// Trả về Map thông tin đã cập nhật hoặc null.
+  Future<Map<String, String>?> checkInvoiceStatus({
+    required SaleModel sale,
+    required ShopModel shop,
+    SalesService? salesService,
+  }) async {
+    if (shop.einvoiceConfig == null) {
+      return null;
+    }
+    final provider = _getProvider(shop);
+    return provider.checkInvoiceStatus(
+      sale: sale,
+      shop: shop,
+      salesService: salesService,
+    );
+  }
+
+  /// Kiểm tra kết nối: gọi login/token của provider tương ứng. Ném Exception nếu thất bại.
+  Future<void> testConnection(ShopModel shop) async {
+    if (shop.einvoiceConfig == null) {
+      throw Exception('Chưa cấu hình thông tin hóa đơn điện tử.');
+    }
+    final provider = _getProvider(shop);
+    await provider.testConnection(shop);
+  }
+
+  /// Phát hành hàng loạt hóa đơn (gọi createInvoice từng đơn).
   Future<List<Map<String, dynamic>>> bulkIssueInvoices({
     required List<SaleModel> sales,
     required ShopModel shop,
     required SalesService salesService,
   }) async {
     final results = <Map<String, dynamic>>[];
-
     for (final sale in sales) {
       try {
         final invoiceInfo = await createInvoice(
@@ -503,7 +146,6 @@ class EinvoiceService {
           shop: shop,
           salesService: salesService,
         );
-        
         results.add({
           'saleId': sale.id,
           'success': true,
@@ -517,7 +159,6 @@ class EinvoiceService {
         });
       }
     }
-
     return results;
   }
 }

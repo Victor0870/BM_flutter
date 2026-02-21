@@ -1,11 +1,17 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/product_model.dart';
 import '../models/category_model.dart';
 import '../models/branch_model.dart';
 import '../models/stock_history_model.dart';
 import 'local_db_service.dart';
 import 'stock_history_service.dart';
+import 'kiot_mapping_service.dart';
+import 'kiot_api_client.dart';
 
 /// Hybrid Product Service - Quản lý sản phẩm với logic hybrid (Offline-First)
 /// - Gói BASIC: Chỉ lưu vào SQLite (Local Database)
@@ -20,11 +26,22 @@ class ProductService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   late final StockHistoryService _stockHistoryService;
 
+  /// Client gọi KiotViet API (2.4). Gán trước khi gọi syncFromKiotViet.
+  KiotVietApiClient? kiotApiClient;
+  /// Map KiotViet -> app. Nếu null, dùng KiotMappingService mặc định (branchId.toString()).
+  KiotMappingService get _kiotMapping => KiotMappingService(branchIdMapper: _kiotBranchIdMapper);
+  Map<int, String>? _kiotBranchIdMapper;
+
   ProductService({
     required this.isPro,
     required this.userId,
   }) {
     _stockHistoryService = StockHistoryService(isPro: isPro, userId: userId);
+  }
+
+  /// Gán map branchId KiotViet (int) -> branchId app (String) để map đúng tồn kho theo chi nhánh.
+  void setKiotBranchIdMapper(Map<int, String>? mapper) {
+    _kiotBranchIdMapper = mapper;
   }
 
   /// Lấy collection reference cho Firestore - Products
@@ -104,14 +121,38 @@ class ProductService {
       final products = snapshot.docs
           .map((doc) => ProductModel.fromFirestore(doc.data(), doc.id))
           .toList();
-      
-      // Lọc chỉ sản phẩm có thể bán (isSellable = true) khi lấy từ Firestore
-      // Note: UI sẽ filter lại nên không cần filter ở đây nếu muốn linh hoạt hơn
       return products;
     } catch (e) {
       if (kDebugMode) {
         debugPrint('Error getting products from Firestore: $e');
       }
+      rethrow;
+    }
+  }
+
+  /// Phân trang: lấy [limit] sản phẩm, [startAfterDocument] cho trang tiếp theo (chỉ 1 lần đọc).
+  Future<({List<ProductModel> products, DocumentSnapshot? lastDoc})> getProductsPaginated({
+    int limit = 20,
+    DocumentSnapshot? startAfterDocument,
+    bool includeInactive = false,
+  }) async {
+    if (!isPro && !kIsWeb) {
+      final all = await _localDb.getProducts(includeInactive: includeInactive);
+      return (products: all, lastDoc: null);
+    }
+    try {
+      Query<Map<String, dynamic>> query = _productsCollection.orderBy('name');
+      if (!includeInactive) query = query.where('isActive', isEqualTo: true);
+      query = query.limit(limit);
+      if (startAfterDocument != null) query = query.startAfterDocument(startAfterDocument);
+      final snapshot = await query.get();
+      final products = snapshot.docs
+          .map((doc) => ProductModel.fromFirestore(doc.data(), doc.id))
+          .toList();
+      final lastDoc = snapshot.docs.isEmpty ? null : snapshot.docs.last;
+      return (products: products, lastDoc: lastDoc);
+    } catch (e) {
+      if (kDebugMode) debugPrint('getProductsPaginated error: $e');
       rethrow;
     }
   }
@@ -318,6 +359,39 @@ class ProductService {
         debugPrint('Product ID: ${product.id}, Stock: ${product.stock}');
       }
       rethrow;
+    }
+  }
+
+  /// Ghi hàng loạt lên Firestore bằng WriteBatch (tối đa 500 thao tác mỗi batch).
+  /// [onProgress] nhận giá trị 0.0..1.0 theo tiến trình.
+  /// PRO/Web: ghi Firestore; không phải Web: đồng bộ thêm vào SQLite.
+  Future<void> importProductsBulk(
+    List<ProductModel> products, {
+    void Function(double)? onProgress,
+  }) async {
+    if (products.isEmpty) {
+      onProgress?.call(1.0);
+      return;
+    }
+    const int maxBatchSize = 500;
+    int processed = 0;
+    for (int i = 0; i < products.length; i += maxBatchSize) {
+      final chunk = products.skip(i).take(maxBatchSize).toList();
+      if (isPro || kIsWeb) {
+        final batch = _firestore.batch();
+        for (final p in chunk) {
+          final ref = _productsCollection.doc(p.id);
+          batch.set(ref, p.toFirestore(), SetOptions(merge: true));
+        }
+        await batch.commit();
+      }
+      if (!kIsWeb) {
+        for (final p in chunk) {
+          await _localDb.addProduct(p);
+        }
+      }
+      processed += chunk.length;
+      onProgress?.call(processed / products.length);
     }
   }
 
@@ -626,6 +700,45 @@ class ProductService {
     }
   }
 
+  static const String _keyLastSyncProducts = 'last_sync_products';
+
+  /// Đồng bộ tăng dần từ Firestore: chỉ lấy document có updatedAt > lastSync, merge vào SQLite.
+  /// Giảm tối đa lượt đọc khi app resume (chỉ đọc doc thay đổi từ thiết bị khác).
+  /// PRO + app only (không chạy trên web).
+  Future<void> syncIncrementalFromCloud() async {
+    if (kIsWeb || !isPro) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_keyLastSyncProducts}_$userId';
+      final lastMs = prefs.getInt(key);
+
+      final List<ProductModel> products;
+      if (lastMs == null) {
+        // Lần đầu: full sync để không bỏ sót doc cũ thiếu updatedAt
+        products = await _getProductsFromFirestore(includeInactive: true);
+      } else {
+        final lastSync = DateTime.fromMillisecondsSinceEpoch(lastMs);
+        final snapshot = await _productsCollection
+            .where('updatedAt', isGreaterThan: Timestamp.fromDate(lastSync))
+            .orderBy('updatedAt')
+            .get();
+        products = snapshot.docs
+            .map((doc) => ProductModel.fromFirestore(doc.data(), doc.id))
+            .toList();
+      }
+
+      for (final p in products) {
+        await _localDb.addProduct(p);
+      }
+      await prefs.setInt(key, DateTime.now().millisecondsSinceEpoch);
+      if (kDebugMode && products.isNotEmpty) {
+        debugPrint('✅ Incremental sync products: ${products.length} docs');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ syncIncrementalFromCloud (products): $e');
+    }
+  }
+
   /// Đồng bộ toàn bộ dữ liệu từ Firestore về SQLite (1 lần duy nhất)
   /// Hàm này được gọi khi khởi tạo ứng dụng hoặc khi người dùng nhấn 'Đồng bộ'
   /// TIẾT KIỆM CHI PHÍ: Chỉ đọc Firestore 1 lần, sau đó tất cả operations chỉ dùng SQLite
@@ -716,6 +829,185 @@ class ProductService {
         debugPrint('❌ Error during syncAllFromCloud: $e');
       }
       rethrow;
+    }
+  }
+
+  /// Đồng bộ hàng hóa từ KiotViet (API 2.4, 2.4.1, 2.12.1).
+  /// Map đầy đủ Lô & Hạn sử dụng (Batch & Expire): isBatchExpireControl và batchExpires từ manageBatch, batchInventories/batches vào Firebase và LocalDB.
+  /// Nếu [lastSync] != null thì gửi lastModifiedFrom trong query để chỉ lấy bản ghi cập nhật sau thời điểm đó (tối ưu hiệu suất).
+  /// Cần gán [kiotApiClient] (và tuỳ chọn setKiotBranchIdMapper) trước khi gọi.
+  Future<({int added, int updated, String? error})> syncFromKiotViet({
+    DateTime? lastSync,
+    int pageSize = 100,
+  }) async {
+    final api = kiotApiClient;
+    if (api == null) {
+      return (added: 0, updated: 0, error: 'Chưa cấu hình KiotViet API client');
+    }
+
+    int added = 0;
+    int updated = 0;
+    try {
+      int currentItem = 0;
+      List<Map<String, dynamic>> allRaw = [];
+      while (true) {
+        final page = await api.fetchProducts(
+          lastModifiedFrom: lastSync,
+          pageSize: pageSize,
+          currentItem: currentItem,
+          includeInventory: true,
+        );
+        if (page.isEmpty) break;
+        allRaw.addAll(page);
+        if (page.length < pageSize) break;
+        currentItem += page.length;
+      }
+
+      final products = _kiotMapping.productsFromKiotList(allRaw);
+
+      for (final product in products) {
+        final existing = await getProductById(product.id);
+        if (existing != null) {
+          await updateProduct(product);
+          updated++;
+        } else {
+          await addProduct(product);
+          added++;
+        }
+      }
+
+      if (kDebugMode) {
+        debugPrint('syncFromKiotViet: added=$added, updated=$updated, lastSync=${lastSync?.toIso8601String()}');
+      }
+      return (added: added, updated: updated, error: null);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('syncFromKiotViet error: $e\n$st');
+      }
+      return (added: added, updated: updated, error: e.toString());
+    }
+  }
+
+  /// Xác thực chữ ký Webhook KiotViet (trang 43): HMAC SHA-256(secret, body) so với header X-Hub-Signature.
+  /// [secretBase64]: mã bí mật đã mã hoá Base64 (như khi đăng ký webhook).
+  /// [xHubSignature]: giá trị header X-Hub-Signature (có thể dạng "sha256=..." hoặc raw base64).
+  static bool verifyKiotWebhookSignature(
+    String body,
+    String secretBase64,
+    String xHubSignature,
+  ) {
+    if (body.isEmpty || secretBase64.isEmpty || xHubSignature.isEmpty) return false;
+    try {
+      final secret = base64Decode(secretBase64);
+      final hmac = Hmac(sha256, secret);
+      final digest = hmac.convert(utf8.encode(body));
+      final expected = base64Encode(digest.bytes);
+      final received = xHubSignature.startsWith('sha256=') ? xHubSignature.substring(7) : xHubSignature;
+      return received == expected;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Xử lý payload Webhook KiotViet (product.update, stock.update).
+  /// Trả về true nếu đã xử lý thành công; false nếu không phải sự kiện hỗ trợ hoặc lỗi.
+  /// [body]: raw request body (để verify chữ ký).
+  /// [xHubSignature]: header X-Hub-Signature.
+  /// [secretBase64]: secret webhook (Base64).
+  Future<bool> handleKiotWebhookPayload({
+    required String body,
+    required String xHubSignature,
+    required String secretBase64,
+  }) async {
+    if (!verifyKiotWebhookSignature(body, secretBase64, xHubSignature)) {
+      if (kDebugMode) debugPrint('KiotWebhook: signature invalid');
+      return false;
+    }
+
+    final payload = jsonDecode(body) as Map<String, dynamic>?;
+    if (payload == null) return false;
+
+    final type = payload['Type'] as String? ?? payload['type'] as String?;
+    if (type == null) return false;
+
+    switch (type) {
+      case 'product.update':
+        return await _handleKiotProductUpdate(payload);
+      case 'stock.update':
+        return await _handleKiotStockUpdate(payload);
+      default:
+        if (kDebugMode) debugPrint('KiotWebhook: unhandled type=$type');
+        return false;
+    }
+  }
+
+  Future<bool> _handleKiotProductUpdate(Map<String, dynamic> payload) async {
+    try {
+      final notifications = payload['Notifications'] as List?;
+      if (notifications == null || notifications.isEmpty) return false;
+
+      for (final notif in notifications) {
+        final dataList = notif['Data'] as List? ?? notif['data'] as List?;
+        if (dataList == null) continue;
+        for (final item in dataList) {
+          final map = item is Map<String, dynamic> ? item : Map<String, dynamic>.from(item as Map);
+          final product = _kiotMapping.productFromKiotJson(map);
+          final existing = await getProductById(product.id);
+          if (existing != null) {
+            await updateProduct(product);
+          } else {
+            await addProduct(product);
+          }
+        }
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('KiotWebhook product.update error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _handleKiotStockUpdate(Map<String, dynamic> payload) async {
+    try {
+      final notifications = payload['Notifications'] as List?;
+      if (notifications == null || notifications.isEmpty) return false;
+
+      for (final notif in notifications) {
+        final dataList = notif['Data'] as List? ?? notif['data'] as List?;
+        if (dataList == null) continue;
+        for (final item in dataList) {
+          final map = item is Map<String, dynamic> ? item : Map<String, dynamic>.from(item as Map);
+          final productIdRaw = map['ProductId'] ?? map['productId'];
+          final branchIdRaw = map['BranchId'] ?? map['branchId'];
+          final onHand = (map['OnHand'] ?? map['onHand']) as num?;
+          if (productIdRaw == null || branchIdRaw == null || onHand == null) continue;
+
+          final productId = productIdRaw.toString();
+          final branchId = branchIdRaw.toString();
+          final appBranchId = _kiotBranchIdMapper != null && branchIdRaw is int
+              ? _kiotBranchIdMapper![branchIdRaw] ?? branchId
+              : branchId;
+
+          final product = await getProductById(productId);
+          if (product == null) continue;
+
+          final currentStock = product.branchStock[appBranchId] ?? 0.0;
+          final change = onHand.toDouble() - currentStock;
+          if (change == 0) continue;
+
+          await updateProductStock(
+            productId,
+            appBranchId,
+            change,
+            type: StockHistoryType.adjustment,
+            note: 'KiotViet webhook stock.update',
+          );
+        }
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('KiotWebhook stock.update error: $e');
+      return false;
     }
   }
 

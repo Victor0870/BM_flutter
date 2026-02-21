@@ -10,28 +10,22 @@ import '../../controllers/sales_provider.dart';
 import '../../controllers/product_provider.dart';
 import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
+import '../../controllers/tutorial_provider.dart';
 import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
 import '../../models/branch_model.dart';
 import '../../models/shop_model.dart';
 import '../../models/customer_model.dart';
+import '../../services/local_db_service.dart';
 import '../../services/payment_service.dart';
+import '../../services/printing_service.dart';
 import '../../widgets/payment_qr_dialog.dart';
 import '../../widgets/branch_selection_dialog.dart';
 import '../../utils/platform_utils.dart';
-
-/// Model cho một tab hóa đơn
-class InvoiceTab {
-  final int id;
-  final String name;
-  final SalesProvider salesProvider;
-
-  InvoiceTab({
-    required this.id,
-    required this.name,
-    required this.salesProvider,
-  });
-}
+import '../../l10n/app_localizations.dart';
+import 'sales_screen_data.dart';
+import 'sales_screen_mobile.dart';
+import 'sales_screen_desktop.dart';
 
 /// Màn hình bán hàng (POS).
 /// Bố cục theo platform: [forceMobile] từ MainScaffold hoặc [isMobilePlatform].
@@ -54,6 +48,7 @@ class _SalesScreenState extends State<SalesScreen> {
   final TextEditingController _customerNameController = TextEditingController();
   final TextEditingController _customerPhoneController = TextEditingController();
   final TextEditingController _customerAddressController = TextEditingController();
+  final TextEditingController _customerTaxCodeController = TextEditingController();
   final TextEditingController _promoCodeController = TextEditingController();
   
   // State để quản lý việc mở/đóng phần thông tin khách hàng
@@ -64,7 +59,8 @@ class _SalesScreenState extends State<SalesScreen> {
   // Gợi ý khách hàng theo số điện thoại (tìm kiếm ngay khi nhập)
   final ValueNotifier<List<CustomerModel>?> _customerPhoneSuggestionsNotifier = ValueNotifier<List<CustomerModel>?>(null);
   final FocusNode _customerPhoneFocusNode = FocusNode();
-  final GlobalKey _customerPhoneFieldKey = GlobalKey();
+  final GlobalKey _customerPhoneFieldKeyMobile = GlobalKey();
+  final GlobalKey _customerPhoneFieldKeyDesktop = GlobalKey();
   OverlayEntry? _customerSuggestionsOverlayEntry;
   /// Trì hoãn xóa overlay khi mất focus để tap vào gợi ý kịp xử lý trước (tránh xóa overlay trước khi onTap chạy).
   Timer? _customerSuggestionsDismissTimer;
@@ -80,11 +76,11 @@ class _SalesScreenState extends State<SalesScreen> {
   @override
   void initState() {
     super.initState();
-    // Tạo tab đầu tiên
+    // Tạo tab đầu tiên (dùng placeholder; cập nhật tên đã localize trong addPostFrameCallback)
     final salesProvider = context.read<SalesProvider>();
     _tabs.add(InvoiceTab(
       id: 0,
-      name: 'Hóa đơn 1',
+      name: '1', // Placeholder - AppLocalizations chưa sẵn sàng trong initState
       salesProvider: salesProvider,
     ));
     _activeTabId = 0;
@@ -101,10 +97,19 @@ class _SalesScreenState extends State<SalesScreen> {
         });
       }
     });
+    // Barcode Master: máy quét Bluetooth/USB gửi mã + Enter; tự động thêm vào giỏ không cần nhấn Enter
+    _productSearchController.addListener(_onProductSearchInputForBarcode);
     // Load products và set active tab sau khi build xong
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Đảm bảo tab 0 tồn tại trong SalesProvider (sau khi build xong)
       if (mounted) {
+        // Cập nhật tên tab đã localize (AppLocalizations chỉ có sau khi build)
+        setState(() {
+          _tabs[0] = InvoiceTab(
+            id: 0,
+            name: AppLocalizations.of(context)!.invoiceTabName('1'),
+            salesProvider: salesProvider,
+          );
+        });
         salesProvider.setActiveTab(0);
       }
       final productProvider = context.read<ProductProvider>();
@@ -114,6 +119,11 @@ class _SalesScreenState extends State<SalesScreen> {
       
       // Kiểm tra và hiển thị dialog chọn chi nhánh cho Admin
       _checkAndShowBranchSelectionDialog();
+      // Chế độ hướng dẫn: thêm 1 sản phẩm mẫu vào giỏ
+      final tutorialProvider = context.read<TutorialProvider>();
+      if (tutorialProvider.isTutorialMode && salesProvider.cart.isEmpty) {
+        salesProvider.addToCart(SalesProvider.getDummyProductForTutorial(), quantity: 1, tabId: 0);
+      }
     });
   }
 
@@ -172,8 +182,26 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
+  /// Barcode Master: máy quét Bluetooth/USB gửi mã + Enter; tự động thêm vào giỏ không cần nhấn Enter.
+  void _onProductSearchInputForBarcode() {
+    final text = _productSearchController.text;
+    if (text.endsWith('\n') || text.endsWith('\r')) {
+      final trimmed = text.replaceAll(RegExp(r'[\r\n]+$'), '').trim();
+      _productSearchController.removeListener(_onProductSearchInputForBarcode);
+      _productSearchController.text = '';
+      _productSearchController.selection = TextSelection.collapsed(offset: 0);
+      _productSearchController.addListener(_onProductSearchInputForBarcode);
+      if (trimmed.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _searchAndAddProduct(trimmed);
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _productSearchController.removeListener(_onProductSearchInputForBarcode);
     _customerSearchDebounce?.cancel();
     _customerSuggestionsDismissTimer?.cancel();
     _removeCustomerSuggestionsOverlay();
@@ -185,6 +213,7 @@ class _SalesScreenState extends State<SalesScreen> {
     _customerNameController.dispose();
     _customerPhoneController.dispose();
     _customerAddressController.dispose();
+    _customerTaxCodeController.dispose();
     _promoCodeController.dispose();
     super.dispose();
   }
@@ -195,7 +224,7 @@ class _SalesScreenState extends State<SalesScreen> {
       final newTabId = salesProvider.createNewTab();
       _tabs.add(InvoiceTab(
         id: newTabId,
-        name: 'Hóa đơn $_nextTabId',
+        name: AppLocalizations.of(context)!.invoiceTabName('$_nextTabId'),
         salesProvider: salesProvider,
       ));
       _activeTabId = newTabId;
@@ -236,10 +265,12 @@ class _SalesScreenState extends State<SalesScreen> {
 
     if (trimmed.length < 3) {
       _customerPhoneSuggestionsNotifier.value = null;
+      _removeCustomerSuggestionsOverlay();
       if (selected != null) {
         salesProvider.clearCustomerSelection(tabId: _activeTabId);
         _customerNameController.clear();
         _customerAddressController.clear();
+        _customerTaxCodeController.clear();
       }
       return;
     }
@@ -249,6 +280,7 @@ class _SalesScreenState extends State<SalesScreen> {
       salesProvider.clearCustomerSelection(tabId: _activeTabId);
       _customerNameController.clear();
       _customerAddressController.clear();
+      _customerTaxCodeController.clear();
     }
 
     // Tìm kiếm ngay (debounce ngắn để gợi ý kịp thời)
@@ -261,6 +293,9 @@ class _SalesScreenState extends State<SalesScreen> {
       if (customers.isNotEmpty) {
         _removeCustomerSuggestionsOverlay();
         _showCustomerSuggestionsOverlay(customers, salesProvider);
+      } else {
+        // Số điện thoại mới, không có gợi ý → ẩn popup gợi ý
+        _removeCustomerSuggestionsOverlay();
       }
     });
   }
@@ -273,10 +308,11 @@ class _SalesScreenState extends State<SalesScreen> {
   /// Hiện popup gợi ý trong Overlay, sát ngay dưới ô SĐT (dùng GlobalKey để lấy vị trí).
   void _showCustomerSuggestionsOverlay(List<CustomerModel> list, SalesProvider salesProvider) {
     final overlay = Overlay.of(context);
-    final activeTabId = _activeTabId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final box = _customerPhoneFieldKey.currentContext?.findRenderObject() as RenderBox?;
+      // Dùng key tương ứng với widget đang hiển thị (mobile bottom sheet hoặc desktop panel)
+      final ctx = _customerPhoneFieldKeyDesktop.currentContext ?? _customerPhoneFieldKeyMobile.currentContext;
+      final box = ctx?.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize) return;
 
       final pos = box.localToGlobal(Offset.zero);
@@ -327,16 +363,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     _customerSuggestionsDismissTimer?.cancel();
                     _customerSuggestionsDismissTimer = null;
                     _removeCustomerSuggestionsOverlay();
-                    _customerPhoneSuggestionsNotifier.value = null;
-                    // Cập nhật UI ngay (đồng bộ) để ô SĐT/tên/địa chỉ hiện đúng, rồi mới gọi provider
-                    _customerNameController.text = c.name;
-                    _customerPhoneController.text = c.phone;
-                    _customerAddressController.text = c.address ?? '';
-                    if (!_isCustomerInfoExpanded) {
-                      setState(() => _isCustomerInfoExpanded = true);
-                    }
-                    setState(() {});
-                    salesProvider.setSelectedCustomerWithDiscount(c, tabId: activeTabId);
+                    _pickCustomerSuggestion(c, salesProvider);
                   },
                 );
               },
@@ -354,7 +381,7 @@ class _SalesScreenState extends State<SalesScreen> {
     _customerPhoneSuggestionsNotifier.value = null;
     await _selectCustomer(customer, salesProvider);
   }
-  
+
   /// Chọn khách hàng và tự động điền thông tin
   Future<void> _selectCustomer(CustomerModel customer, SalesProvider salesProvider) async {
     // Set customer trong provider và áp dụng chiết khấu
@@ -374,6 +401,29 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
   
+  /// Gọi PrintingService khi bật "Tự động in sau khi thanh toán" (từ shop hoặc SharedPreferences) và có đơn vừa hoàn tất.
+  Future<void> _maybeAutoPrint(BuildContext context) async {
+    final authProvider = context.read<AuthProvider>();
+    final salesProvider = context.read<SalesProvider>();
+    final shop = authProvider.shop;
+    final sale = salesProvider.lastCompletedSale;
+    final shouldPrint = shop?.autoPrintAfterPayment ?? await LocalDbService().getAutoPrintAfterPayment();
+    if (!shouldPrint || sale == null) return;
+    salesProvider.clearLastCompletedSale();
+    final paperMm = shop != null && (shop.printerPaperSizeMm == 58 || shop.printerPaperSizeMm == 80)
+        ? shop.printerPaperSizeMm
+        : await LocalDbService().getPrinterPaperSizeMm();
+    final printerNameOverride = shop?.printerName ?? await LocalDbService().getPrinterName();
+    if (!context.mounted) return;
+    PrintingService.requestPrint(
+      context,
+      sale: sale,
+      shop: shop,
+      paperMmOverride: paperMm,
+      printerNameOverride: printerNameOverride,
+    );
+  }
+
   /// Xử lý sau khi thanh toán thành công
   /// Tự động đóng tab nếu không phải là tab duy nhất, hoặc reset về trạng thái trống
   void _handlePostCheckout(int tabId) {
@@ -393,7 +443,7 @@ class _SalesScreenState extends State<SalesScreen> {
           final newTabId = salesProvider.createNewTab();
           _tabs.add(InvoiceTab(
             id: newTabId,
-            name: 'Hóa đơn $_nextTabId',
+            name: AppLocalizations.of(context)!.invoiceTabName('$_nextTabId'),
             salesProvider: salesProvider,
           ));
           _activeTabId = newTabId;
@@ -404,7 +454,7 @@ class _SalesScreenState extends State<SalesScreen> {
         final salesProvider = context.read<SalesProvider>();
         final id = _tabs.single.id;
         _tabs.clear();
-        _tabs.add(InvoiceTab(id: id, name: 'Hóa đơn 1', salesProvider: salesProvider));
+        _tabs.add(InvoiceTab(id: id, name: AppLocalizations.of(context)!.invoiceTabName('1'), salesProvider: salesProvider));
         _activeTabId = id;
         _nextTabId = 2;
         salesProvider.setActiveTab(id);
@@ -430,15 +480,22 @@ class _SalesScreenState extends State<SalesScreen> {
     if (query.trim().isEmpty) return;
     
     final productProvider = context.read<ProductProvider>();
-    final salesProvider = _getActiveSalesProvider();
 
     // Đảm bảo products đã được load
     if (productProvider.products.isEmpty && !productProvider.isLoading) {
       await productProvider.loadProducts();
     }
 
-    // Tìm kiếm sản phẩm
     final searchQuery = query.trim().toLowerCase();
+
+    // Barcode Master: tra cứu O(1) theo mã vạch (<100ms) — ưu tiên khi quét Bluetooth/USB
+    final byBarcode = productProvider.findProductByBarcode(query.trim());
+    if (byBarcode != null && byBarcode.isSellable && byBarcode.isActive) {
+      await _addProductToCartOrShowBatchPicker(byBarcode);
+      return;
+    }
+
+    // Tìm kiếm theo tên / mã / SKU
     final allProducts = productProvider.products
         .where((p) => p.isSellable && p.isActive)
         .toList();
@@ -451,19 +508,9 @@ class _SalesScreenState extends State<SalesScreen> {
     }).toList();
 
     if (matchingProducts.isNotEmpty) {
-      // Nếu chỉ có 1 sản phẩm, thêm trực tiếp
+      // Nếu chỉ có 1 sản phẩm, thêm trực tiếp (hoặc mở dialog chọn lô nếu isBatchExpireControl)
       if (matchingProducts.length == 1) {
-        salesProvider.addToCart(matchingProducts.first, tabId: _activeTabId);
-        _productSearchController.clear();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Đã thêm ${matchingProducts.first.name} vào giỏ hàng'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 1),
-            ),
-          );
-        }
+        await _addProductToCartOrShowBatchPicker(matchingProducts.first);
       } else {
         // Nếu có nhiều sản phẩm, mở màn hình chọn
         if (!mounted) return;
@@ -476,15 +523,14 @@ class _SalesScreenState extends State<SalesScreen> {
           ),
         );
         if (product != null && mounted) {
-          salesProvider.addToCart(product, tabId: _activeTabId);
-          _productSearchController.clear();
+          await _addProductToCartOrShowBatchPicker(product);
         }
       }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Không tìm thấy sản phẩm'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.productNotFound),
             backgroundColor: Colors.orange,
           ),
         );
@@ -502,12 +548,168 @@ class _SalesScreenState extends State<SalesScreen> {
     );
 
     if (product != null && mounted) {
-      _getActiveSalesProvider().addToCart(product, tabId: _activeTabId);
+      await _addProductToCartOrShowBatchPicker(product);
     }
   }
 
   SalesProvider _getActiveSalesProvider() {
     return context.read<SalesProvider>(); // Tạm thời dùng chung, có thể mở rộng sau
+  }
+
+  /// Thêm sản phẩm vào giỏ: nếu sản phẩm quản lý theo lô (isBatchExpireControl), hiển thị dialog chọn lô.
+  Future<void> _addProductToCartOrShowBatchPicker(ProductModel product, {double quantity = 1}) async {
+    final salesProvider = _getActiveSalesProvider();
+    final customer = salesProvider.getSelectedCustomer(_activeTabId);
+    final branchId = context.read<BranchProvider>().currentBranchId ?? '';
+
+    if (product.isBatchExpireControl && product.batchExpires.isNotEmpty) {
+      final batches = product.batchExpires
+          .where((b) => (branchId.isEmpty || b.branchId == branchId) && b.onHand > 0)
+          .toList();
+      if (batches.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.noBatchAtBranch),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+      final result = await _showBatchPickerDialog(product, batches);
+      if (result != null && mounted) {
+        salesProvider.addToCart(
+          product,
+          quantity: result.$3,
+          tabId: _activeTabId,
+          customer: customer,
+          batchName: result.$1,
+          expireDate: result.$2,
+        );
+        _productSearchController.clear();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.addedToCart(product.name, result.$1)),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 1),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    salesProvider.addToCart(product, quantity: quantity, tabId: _activeTabId, customer: customer);
+    _productSearchController.clear();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.addedToCartSimple(product.name)),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  /// Dialog chọn lô hàng (KiotViet 2.4.1, 2.12.1 — Batch & Expire). Trả về (batchName, expireDate, quantity) hoặc null.
+  Future<(String, DateTime?, double)?> _showBatchPickerDialog(
+    ProductModel product,
+    List<ProductBatchExpire> batches,
+  ) async {
+    final qtyController = TextEditingController(text: '1');
+    ProductBatchExpire? selectedBatch = batches.first;
+
+    return showDialog<(String, DateTime?, double)?>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(AppLocalizations.of(context)!.selectBatch),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      product.name,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0F172A),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(AppLocalizations.of(context)!.existingBatches, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    RadioGroup<ProductBatchExpire>(
+                      groupValue: selectedBatch,
+                      onChanged: (v) => setState(() => selectedBatch = v),
+                      child: Column(
+                        children: batches.map((b) {
+                          return RadioListTile<ProductBatchExpire>(
+                            value: b,
+                            title: Text(
+                              b.batchName,
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                            ),
+                            subtitle: Text(
+                              'Hạn: ${b.expireDate != null ? DateFormat('dd/MM/yyyy').format(b.expireDate!) : '—'} • Tồn: ${b.onHand.toStringAsFixed(0)}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: qtyController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: AppLocalizations.of(context)!.quantity,
+                        border: const OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text(AppLocalizations.of(context)!.cancel),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final qty = double.tryParse(qtyController.text.trim()) ?? 1;
+                    if (qty <= 0 || selectedBatch == null) {
+                      Navigator.of(ctx).pop();
+                      return;
+                    }
+                    if (qty > selectedBatch!.onHand) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(AppLocalizations.of(context)!.quantityExceedsBatch(selectedBatch!.onHand.toStringAsFixed(0))),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.of(ctx).pop((selectedBatch!.batchName, selectedBatch!.expireDate, qty));
+                  },
+                  child: Text(AppLocalizations.of(context)!.addToCart),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   String _formatPrice(double price) {
@@ -522,8 +724,8 @@ class _SalesScreenState extends State<SalesScreen> {
     // Kiểm tra giỏ hàng của tab hiện tại
     if (salesProvider.isCartEmptyForTab(currentTabId)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Giỏ hàng trống'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.emptyCart),
           backgroundColor: Colors.orange,
         ),
       );
@@ -534,19 +736,19 @@ class _SalesScreenState extends State<SalesScreen> {
     final paymentMethod = await showDialog<PaymentMethodType>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Chọn phương thức thanh toán'),
+        title: Text(AppLocalizations.of(context)!.selectPaymentMethod),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: const Icon(Icons.money, color: Colors.green),
-              title: const Text('Tiền mặt'),
+              title: Text(AppLocalizations.of(context)!.cash),
               onTap: () => Navigator.pop(context, PaymentMethodType.cash),
             ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.qr_code, color: Colors.blue),
-              title: const Text('Chuyển khoản QR'),
+              title: Text(AppLocalizations.of(context)!.qrTransfer),
               onTap: () => Navigator.pop(context, PaymentMethodType.transfer),
             ),
           ],
@@ -554,7 +756,7 @@ class _SalesScreenState extends State<SalesScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Hủy'),
+            child: Text(AppLocalizations.of(context)!.cancel),
           ),
         ],
       ),
@@ -571,55 +773,62 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   Future<void> _processCashPayment(SalesProvider salesProvider, int tabId) async {
+    final tutorialProvider = context.read<TutorialProvider>();
+    final isTutorialMode = tutorialProvider.isTutorialMode;
     // Lấy tổng tiền từ tab hiện tại
     final finalTotal = salesProvider.getFinalTotal(tabId);
     
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Xác nhận thanh toán'),
+        title: Text(AppLocalizations.of(context)!.confirmPayment),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Tổng tiền: ${_formatPrice(finalTotal)} đ'),
+            Text(AppLocalizations.of(context)!.totalAmount(_formatPrice(finalTotal))),
             const SizedBox(height: 8),
-            const Text('Phương thức: Tiền mặt'),
+            Text(AppLocalizations.of(context)!.paymentMethodCash),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Hủy'),
+            child: Text(AppLocalizations.of(context)!.cancel),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Xác nhận'),
+            child: Text(AppLocalizations.of(context)!.confirm),
           ),
         ],
       ),
     );
 
     if (confirmed == true) {
-      final success = await salesProvider.checkout(tabId: tabId);
+      final success = await salesProvider.checkout(tabId: tabId, isTutorialMode: isTutorialMode);
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
       final productProvider = context.read<ProductProvider>();
       if (success) {
-        salesProvider.clearCart(tabId: tabId);
-        _handlePostCheckout(tabId);
-        await productProvider.loadProducts();
+        if (!isTutorialMode) {
+          salesProvider.clearCart(tabId: tabId);
+          _handlePostCheckout(tabId);
+          await _maybeAutoPrint(context);
+          await productProvider.loadProducts();
+        } else {
+          tutorialProvider.setTutorialMode(false);
+        }
         if (!mounted) return;
         messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Thanh toán thành công!'),
+          SnackBar(
+            content: Text(isTutorialMode ? AppLocalizations.of(context)!.tutorialOrderSuccess : AppLocalizations.of(context)!.paymentSuccess),
             backgroundColor: Colors.green,
           ),
         );
       } else {
         messenger.showSnackBar(
           SnackBar(
-            content: Text(salesProvider.errorMessage ?? 'Thanh toán thất bại'),
+            content: Text(salesProvider.errorMessage ?? AppLocalizations.of(context)!.paymentFailed),
             backgroundColor: Colors.red,
           ),
         );
@@ -671,15 +880,15 @@ class _SalesScreenState extends State<SalesScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Thanh toán chuyển khoản'),
+          title: Text(AppLocalizations.of(context)!.qrPayment),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Tổng tiền: ${_formatPrice(totalAmount)} đ'),
+              Text(AppLocalizations.of(context)!.totalAmount(_formatPrice(totalAmount))),
               const SizedBox(height: 16),
-              const Text(
-                '⚠️ Vui lòng tự kiểm tra xác nhận thanh toán từ khách hàng trước khi hoàn tất đơn hàng.',
+              Text(
+                AppLocalizations.of(context)!.qrTransferManualConfirm,
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.orange,
@@ -691,11 +900,11 @@ class _SalesScreenState extends State<SalesScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Hủy'),
+              child: Text(AppLocalizations.of(context)!.cancel),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Tạo đơn hàng'),
+              child: Text(AppLocalizations.of(context)!.createOrder),
             ),
           ],
         ),
@@ -709,12 +918,13 @@ class _SalesScreenState extends State<SalesScreen> {
           
           // Tự động đóng tab hoặc reset về trạng thái trống
           _handlePostCheckout(tabId);
-          
+          await _maybeAutoPrint(context);
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Đơn hàng đã được tạo. Vui lòng kiểm tra tài khoản và xác nhận khi đã nhận tiền.'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.orderCreatedMessage),
               backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
+              duration: const Duration(seconds: 3),
             ),
           );
         }
@@ -737,7 +947,7 @@ class _SalesScreenState extends State<SalesScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(salesProvider.errorMessage ?? 'Không thể tạo đơn hàng'),
+            content: Text(salesProvider.errorMessage ?? AppLocalizations.of(context)!.cannotCreateOrder),
             backgroundColor: Colors.red,
           ),
         );
@@ -759,10 +969,10 @@ class _SalesScreenState extends State<SalesScreen> {
     if (qrData == null || qrData.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Không thể tạo mã QR. Vui lòng kiểm tra cấu hình thanh toán trong Cài đặt.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.cannotCreateQr),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -790,7 +1000,7 @@ class _SalesScreenState extends State<SalesScreen> {
           onCancel: () {
             // Có thể hủy đơn hàng hoặc giữ nguyên
           },
-          onPaymentSuccess: () {
+          onPaymentSuccess: () async {
             if (mounted) {
               // Trừ kho đã được xử lý trong completeTransferPayment() của SalesProvider
               // Xóa giỏ hàng của tab hiện tại
@@ -800,17 +1010,20 @@ class _SalesScreenState extends State<SalesScreen> {
               _handlePostCheckout(tabId);
               
               productProvider.loadProducts();
-              
+              // Đợi completeTransferPayment từ polling xong rồi mới gọi auto-print
+              await Future.delayed(const Duration(milliseconds: 600));
+              if (mounted) await _maybeAutoPrint(context);
+              if (!mounted) return;
               // Hiển thị thông báo về hóa đơn điện tử nếu có
               final invoiceUrl = salesProvider.lastInvoiceUrl;
               if (invoiceUrl != null && invoiceUrl.isNotEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: const Text('Thanh toán thành công! Hóa đơn điện tử đã được tạo.'),
+                    content: Text(AppLocalizations.of(context)!.paymentSuccessEinvoice),
                     backgroundColor: Colors.green,
                     duration: const Duration(seconds: 5),
                     action: SnackBarAction(
-                      label: 'Mở hóa đơn',
+                      label: AppLocalizations.of(context)!.openInvoice,
                       textColor: Colors.white,
                       onPressed: () async {
                         try {
@@ -822,7 +1035,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Không thể mở link: $e'),
+                                content: Text(AppLocalizations.of(context)!.cannotOpenLink(e)),
                                 backgroundColor: Colors.red,
                               ),
                             );
@@ -834,10 +1047,10 @@ class _SalesScreenState extends State<SalesScreen> {
                 );
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ Thanh toán thành công!'),
+                  SnackBar(
+                    content: Text('✅ ${AppLocalizations.of(context)!.paymentSuccess}'),
                     backgroundColor: Colors.green,
-                    duration: Duration(seconds: 3),
+                    duration: const Duration(seconds: 3),
                   ),
                 );
               }
@@ -860,62 +1073,264 @@ class _SalesScreenState extends State<SalesScreen> {
             (b) => b.id == currentBranchId,
             orElse: () => BranchModel(
               id: 'default',
-              name: 'Cửa hàng chính',
-              address: 'Quận 1 - TP. Hồ Chí Minh',
+              name: AppLocalizations.of(context)!.mainBranch,
+              address: AppLocalizations.of(context)!.defaultAddress,
             ),
           )
         : BranchModel(
             id: 'default',
-            name: 'Chưa chọn chi nhánh',
-            address: 'Vui lòng chọn chi nhánh',
+            name: AppLocalizations.of(context)!.noBranchSelected,
+            address: AppLocalizations.of(context)!.pleaseSelectBranch,
           );
     
     // Lấy tên nhân viên
     final employeeName = authProvider.userProfile?.displayName ?? 
                         authProvider.user?.email?.split('@').first ?? 
-                        'Nhân viên';
+                        AppLocalizations.of(context)!.staffLabel;
     
-    final useMobileLayout = _useMobileLayout;
+    final cartItemCount = context.watch<SalesProvider>().getCart(_activeTabId).length;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // slate-100
-      appBar: _buildSalesAppBar(context, branch, employeeName, authProvider),
-      body: Column(
-        children: [
-          Expanded(
-            child: useMobileLayout
-                ? _buildMobileBody()
-                : _buildDesktopBody(),
-          ),
-          if (useMobileLayout) _buildMobileStickyBottom(),
-        ],
+    final useMobile = _useMobileLayout;
+    final productGrid = !useMobile
+        ? _buildLeftPanel(isMobile: false)
+        : Column(
+            children: [
+              Expanded(
+                child: _buildLeftPanel(
+                  isMobile: true,
+                  showCartListInPanel: false,
+                ),
+              ),
+              _buildMobileSecondaryButtons(),
+            ],
+          );
+
+    return Consumer<TutorialProvider>(
+      builder: (context, tutorialProvider, _) {
+        final body = useMobile
+            ? SalesScreenMobileBody(
+                headerSection: const SizedBox.shrink(),
+                cartListSection: _buildMobileCartListSection(),
+                floatingButtonSection: const SizedBox.shrink(),
+                bottomBarSection: _buildMobileBottomBarSection(),
+              )
+            : SalesScreenDesktopBody(
+                productGrid: productGrid,
+                cartAndPayment: _buildRightPanel(),
+                cartItemCount: cartItemCount,
+              );
+        return Scaffold(
+          backgroundColor: const Color(0xFFF1F5F9), // slate-100
+          appBar: useMobile
+              ? _buildMobileSalesAppBar()
+              : _buildSalesAppBar(context, branch, employeeName, authProvider),
+          body: tutorialProvider.isTutorialMode
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      color: Colors.orange,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Colors.white, size: 22),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              AppLocalizations.of(context)!.tutorialModeHint,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => tutorialProvider.setTutorialMode(false),
+                            child: Text(AppLocalizations.of(context)!.exit, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(child: body),
+                  ],
+                )
+              : body,
+        );
+      },
+    );
+  }
+
+  /// Mở scene phụ thanh toán (mobile): Chi nhánh + NV, Khách hàng, Khuyến mãi, Thuế, nút THANH TOÁN.
+  void _openMobilePaymentScene() {
+    final salesProvider = _getActiveSalesProvider();
+    if (salesProvider.isCartEmptyForTab(_activeTabId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.emptyCart),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    final branchProvider = context.read<BranchProvider>();
+    final authProvider = context.read<AuthProvider>();
+    final currentBranchId = branchProvider.currentBranchId;
+    final branch = currentBranchId != null
+        ? branchProvider.branches.firstWhere(
+              (b) => b.id == currentBranchId,
+              orElse: () => BranchModel(
+                id: 'default',
+                name: AppLocalizations.of(context)!.mainBranch,
+                address: AppLocalizations.of(context)!.defaultAddress,
+              ),
+            )
+        : BranchModel(
+            id: 'default',
+            name: AppLocalizations.of(context)!.noBranchSelected,
+            address: AppLocalizations.of(context)!.pleaseSelectBranch,
+          );
+    final employeeName = authProvider.userProfile?.displayName ??
+        authProvider.user?.email?.split('@').first ??
+        AppLocalizations.of(context)!.staffLabel;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SalesPaymentScene(
+          tabId: _activeTabId,
+          formatPrice: _formatPrice,
+          branchName: branch.name,
+          employeeName: employeeName,
+          onBack: () => Navigator.of(context).pop(),
+          onOpenCustomer: _showCustomerInfoBottomSheet,
+          onOpenDiscount: () => _showDiscountDialog(salesProvider),
+          onCheckout: () async {
+            final navigator = Navigator.of(context);
+            await _handleCheckout();
+            if (!mounted) return;
+            navigator.pop();
+          },
+        ),
       ),
     );
   }
 
-  /// Giao diện 2 cột khi isDesktop(context) hoặc Tablet: trái = danh sách sản phẩm + giỏ, phải = khách hàng + thanh toán.
-  Widget _buildDesktopBody() {
-    return Row(
+  /// Phần danh sách giỏ hàng mobile (Expanded). Nút thêm sản phẩm nằm trong khu vực giỏ, góc dưới phải, không đè bottom bar.
+  Widget _buildMobileCartListSection() {
+    return Stack(
       children: [
-        Expanded(
-          flex: 3,
-          child: _buildLeftPanel(isMobile: false),
+        Consumer<SalesProvider>(
+          builder: (context, salesProvider, child) {
+            final cart = salesProvider.getCart(_activeTabId);
+            if (cart.isEmpty) {
+              return Container(
+                margin: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.shoppingCart, size: 48, color: Colors.grey[300]),
+                      const SizedBox(height: 16),
+                      Text(
+                        AppLocalizations.of(context)!.emptyCartHint,
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        AppLocalizations.of(context)!.pressAddProductHint,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 72),
+              itemCount: cart.length,
+              itemBuilder: (context, index) {
+                final entry = cart.entries.elementAt(index);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _buildMobileCartCard(entry.key, entry.value, salesProvider),
+                );
+              },
+            );
+          },
         ),
-        SizedBox(
-          width: 380,
-          child: _buildRightPanel(),
+        Positioned(
+          bottom: 26,
+          right: 26,
+          child: FloatingActionButton(
+            onPressed: _showProductSelection,
+            tooltip: AppLocalizations.of(context)!.addProduct,
+            backgroundColor: const Color(0xFF22C55E),
+            foregroundColor: Colors.white,
+            elevation: 6,
+            child: const Icon(LucideIcons.plus, size: 28),
+          ),
         ),
       ],
     );
   }
 
-  /// Nội dung chính trên Mobile: chỉ giỏ hàng (không tab), sticky bottom luôn hiện.
-  Widget _buildMobileBody() {
-    return Column(
-      children: [
-        Expanded(child: _buildLeftPanel(isMobile: true)),
-        _buildMobileSecondaryButtons(),
-      ],
+  /// Phần bottom bar mobile: Tổng tiền + nút Thanh toán.
+  Widget _buildMobileBottomBarSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey[200]!)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Consumer<SalesProvider>(
+            builder: (context, salesProvider, child) {
+              final totals = salesProvider.calculateTotals(_activeTabId);
+              final subTotal = totals['subTotal'] ?? 0.0;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(AppLocalizations.of(context)!.totalAmountLabel, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                      Text('${_formatPrice(subTotal)}đ', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _openMobilePaymentScene,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      child: Text(AppLocalizations.of(context)!.pay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 
@@ -932,7 +1347,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 child: OutlinedButton.icon(
                   onPressed: () => _showCustomerInfoBottomSheet(),
                   icon: const Icon(LucideIcons.user, size: 18),
-                  label: const Text('Khách hàng'),
+                  label: Text(AppLocalizations.of(context)!.customer),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF2563EB),
                     side: const BorderSide(color: Color(0xFF2563EB)),
@@ -945,7 +1360,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 child: OutlinedButton.icon(
                   onPressed: () => _showDiscountDialog(salesProvider),
                   icon: const Icon(LucideIcons.tag, size: 18),
-                  label: const Text('Khuyến mãi'),
+                  label: Text(AppLocalizations.of(context)!.promotion),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFF97316),
                     side: const BorderSide(color: Color(0xFFF97316)),
@@ -960,114 +1375,13 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  /// Thanh thanh toán cố định ở đáy màn hình (Mobile): Tiền hàng, Khuyến mãi, Thuế, Tổng thanh toán + nút THANH TOÁN.
-  Widget _buildMobileStickyBottom() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 12,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Consumer<SalesProvider>(
-          builder: (context, salesProvider, _) {
-            final totals = salesProvider.calculateTotals(_activeTabId);
-            final totalBeforeDiscount = totals['totalBeforeDiscount'] ?? 0.0;
-            final discountAmount = totals['discountAmount'] ?? 0.0;
-            final taxAmount = totals['taxAmount'] ?? 0.0;
-            final vatRate = totals['vatRate'] ?? 0.0;
-            final finalTotal = totals['finalTotal'] ?? 0.0;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildMobileSummaryRow('Tiền hàng', '${_formatPrice(totalBeforeDiscount)}đ', const Color(0xFF64748B)),
-                const SizedBox(height: 6),
-                _buildMobileSummaryRow(
-                  'Khuyến mãi',
-                  discountAmount > 0 ? '-${_formatPrice(discountAmount)}đ' : '0đ',
-                  discountAmount > 0 ? const Color(0xFFF97316) : const Color(0xFF64748B),
-                ),
-                const SizedBox(height: 6),
-                _buildMobileSummaryRow(
-                  vatRate > 0 ? 'Thuế ($vatRate%)' : 'Thuế',
-                  '${_formatPrice(taxAmount)}đ',
-                  const Color(0xFF64748B),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text(
-                      'Tổng thanh toán',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF64748B),
-                      ),
-                    ),
-                    Text(
-                      '${_formatPrice(finalTotal)}đ',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF2563EB),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _handleCheckout,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      elevation: 2,
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(LucideIcons.zap, size: 24),
-                        SizedBox(width: 10),
-                        Text(
-                          'THANH TOÁN',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
   /// Hiển thị form thông tin khách hàng trong BottomSheet (Mobile).
   void _showCustomerInfoBottomSheet() {
     final salesProvider = context.read<SalesProvider>();
     _customerNameController.text = salesProvider.getCustomerName(_activeTabId) ?? '';
     _customerPhoneController.text = salesProvider.getCustomerPhone(_activeTabId) ?? '';
     _customerAddressController.text = salesProvider.getCustomerAddress(_activeTabId) ?? '';
+    _customerTaxCodeController.text = salesProvider.getCustomerTaxCode(_activeTabId) ?? '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1087,9 +1401,9 @@ class _SalesScreenState extends State<SalesScreen> {
                 controller: scrollController,
                 padding: const EdgeInsets.all(20),
                 children: [
-                  const Text(
-                    'Thông tin khách hàng',
-                    style: TextStyle(
+                  Text(
+                    AppLocalizations.of(context)!.customerInfo,
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: Color(0xFF1E293B),
@@ -1097,12 +1411,12 @@ class _SalesScreenState extends State<SalesScreen> {
                   ),
                   const SizedBox(height: 16),
                   RepaintBoundary(
-                    key: _customerPhoneFieldKey,
+                    key: _customerPhoneFieldKeyMobile,
                     child: TextField(
                       controller: _customerPhoneController,
                       focusNode: _customerPhoneFocusNode,
                       keyboardType: TextInputType.phone,
-                      decoration: _mobileInputDecoration('Số điện thoại'),
+                      decoration: _mobileInputDecoration(AppLocalizations.of(context)!.phone),
                       onChanged: (v) {
                         salesProvider.setCustomerPhone(v.isEmpty ? null : v, tabId: _activeTabId);
                         _onCustomerPhoneChanged(v);
@@ -1112,13 +1426,14 @@ class _SalesScreenState extends State<SalesScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _customerNameController,
-                    decoration: _mobileInputDecoration('Tên khách hàng'),
+                    decoration: _mobileInputDecoration(AppLocalizations.of(context)!.customerName),
                     onChanged: (v) {
                       final selected = salesProvider.getSelectedCustomer(_activeTabId);
                       if (selected != null && v.trim() != selected.name.trim()) {
                         salesProvider.clearCustomerSelection(tabId: _activeTabId);
                         _customerPhoneController.clear();
                         _customerAddressController.clear();
+                        _customerTaxCodeController.clear();
                       }
                       salesProvider.setCustomerName(v.isEmpty ? null : v, tabId: _activeTabId);
                     },
@@ -1126,9 +1441,17 @@ class _SalesScreenState extends State<SalesScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _customerAddressController,
-                    decoration: _mobileInputDecoration('Địa chỉ'),
+                    decoration: _mobileInputDecoration(AppLocalizations.of(context)!.address),
                     onChanged: (v) =>
                         salesProvider.setCustomerAddress(v.isEmpty ? null : v, tabId: _activeTabId),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _customerTaxCodeController,
+                    keyboardType: TextInputType.text,
+                    decoration: _mobileInputDecoration(AppLocalizations.of(context)!.taxCodeForInvoice),
+                    onChanged: (v) =>
+                        salesProvider.setCustomerTaxCode(v.isEmpty ? null : v, tabId: _activeTabId),
                   ),
                   const SizedBox(height: 24),
                   SizedBox(
@@ -1137,12 +1460,13 @@ class _SalesScreenState extends State<SalesScreen> {
                       onPressed: () => Navigator.pop(ctx),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text('Xong'),
+                      child: Text(AppLocalizations.of(context)!.confirm),
                     ),
                   ),
                 ],
@@ -1198,7 +1522,7 @@ class _SalesScreenState extends State<SalesScreen> {
           Icon(LucideIcons.mapPin, size: iconSize, color: const Color(0xFF60A5FA)),
           SizedBox(width: spacing),
           Text(
-            'Chi nhánh: ',
+            AppLocalizations.of(context)!.branchLabel,
             style: TextStyle(
               fontSize: fsLabel,
               color: Colors.grey[300],
@@ -1232,7 +1556,7 @@ class _SalesScreenState extends State<SalesScreen> {
           ),
           SizedBox(width: spacing),
           Text(
-            'NV: ',
+            AppLocalizations.of(context)!.staffShortLabel,
             style: TextStyle(
               fontSize: fsLabel,
               color: Colors.grey[300],
@@ -1256,7 +1580,89 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  Widget _buildLeftPanel({bool isMobile = false}) {
+  /// AppBar mobile: chỉ tabs (Hóa đơn 1, 2...) + nút "+" thêm hóa đơn. Tiết kiệm không gian.
+  PreferredSizeWidget _buildMobileSalesAppBar() {
+    return AppBar(
+      backgroundColor: Colors.white,
+      foregroundColor: const Color(0xFF1E293B),
+      elevation: 0,
+      titleSpacing: 16,
+      centerTitle: false,
+      title: SizedBox(
+        height: 44,
+        child: Row(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _tabs.length + 1,
+                itemBuilder: (context, index) {
+                if (index == _tabs.length) {
+                  return IconButton(
+                    icon: const Icon(LucideIcons.plus, size: 20),
+                    color: Colors.grey.shade600,
+                    onPressed: _addNewTab,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  );
+                }
+                final tab = _tabs[index];
+                final isActive = tab.id == _activeTabId;
+                return GestureDetector(
+                  onTap: () => _setActiveTab(tab.id),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isActive ? const Color(0xFFEFF6FF) : Colors.transparent,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(8),
+                        topRight: Radius.circular(8),
+                      ),
+                      border: Border(
+                        bottom: BorderSide(
+                          color: isActive ? const Color(0xFF2563EB) : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          tab.name,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                            color: isActive ? const Color(0xFF2563EB) : Colors.grey.shade600,
+                          ),
+                        ),
+                        if (_tabs.length > 1) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () => _removeTab(tab.id),
+                            child: Icon(
+                              LucideIcons.x,
+                              size: 12,
+                              color: isActive ? const Color(0xFF2563EB) : Colors.grey.shade400,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ),
+      actions: const [],
+    );
+  }
+
+  Widget _buildLeftPanel({bool isMobile = false, bool showCartListInPanel = true}) {
     // Desktop: Column fill height — header gọn, giỏ hàng Expanded (scroll trong), action bar gọn → bỏ khoảng trống trên/dưới.
     if (!isMobile) {
       return Column(
@@ -1347,7 +1753,7 @@ class _SalesScreenState extends State<SalesScreen> {
                   child: TextField(
                     controller: _productSearchController,
                     decoration: InputDecoration(
-                      hintText: 'Tìm sản phẩm (F2) - quét mã vạch hoặc nhập tên...',
+                      hintText: AppLocalizations.of(context)!.searchProductHint,
                       isDense: true,
                       prefixIcon: IconButton(
                         icon: const Icon(LucideIcons.search, size: 20, color: Color(0xFF94A3B8)),
@@ -1363,13 +1769,13 @@ class _SalesScreenState extends State<SalesScreen> {
                             icon: const Icon(LucideIcons.qrCode, size: 20),
                             color: Colors.grey[400],
                             onPressed: _scanBarcode,
-                            tooltip: 'Quét mã vạch',
+                            tooltip: AppLocalizations.of(context)!.scanBarcode,
                           ),
                           IconButton(
                             icon: const Icon(LucideIcons.list, size: 20),
                             color: Colors.grey[400],
                             onPressed: _showProductSelection,
-                            tooltip: 'Chọn sản phẩm',
+                            tooltip: AppLocalizations.of(context)!.selectProduct,
                           ),
                         ],
                       ),
@@ -1405,7 +1811,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           Icon(LucideIcons.shoppingCart, size: 48, color: Colors.grey[300]),
                           const SizedBox(height: 12),
                           Text(
-                            'Chưa có sản phẩm nào trong giỏ hàng',
+                            AppLocalizations.of(context)!.emptyCartHint,
                             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey[400]),
                           ),
                         ],
@@ -1435,12 +1841,12 @@ class _SalesScreenState extends State<SalesScreen> {
                         child: Row(
                           children: [
                             SizedBox(width: 48, child: Center(child: _buildTableHeader('#'))),
-                            SizedBox(width: 64, child: Center(child: _buildTableHeader('Xóa'))),
-                            Expanded(child: _buildTableHeader('Tên hàng')),
-                            SizedBox(width: 80, child: Center(child: _buildTableHeader('ĐVT'))),
-                            SizedBox(width: 160, child: Center(child: _buildTableHeader('Số lượng'))),
-                            SizedBox(width: 120, child: Align(alignment: Alignment.centerRight, child: _buildTableHeader('Đơn giá'))),
-                            SizedBox(width: 120, child: Align(alignment: Alignment.centerRight, child: _buildTableHeader('Thành tiền'))),
+                            SizedBox(width: 64, child: Center(child: _buildTableHeader(AppLocalizations.of(context)!.deleteHeader))),
+                            Expanded(child: _buildTableHeader(AppLocalizations.of(context)!.productName)),
+                            SizedBox(width: 80, child: Center(child: _buildTableHeader(AppLocalizations.of(context)!.unitHeader))),
+                            SizedBox(width: 160, child: Center(child: _buildTableHeader(AppLocalizations.of(context)!.quantity))),
+                            SizedBox(width: 120, child: Align(alignment: Alignment.centerRight, child: _buildTableHeader(AppLocalizations.of(context)!.unitPriceHeader))),
+                            SizedBox(width: 120, child: Align(alignment: Alignment.centerRight, child: _buildTableHeader(AppLocalizations.of(context)!.amountHeader))),
                           ],
                         ),
                       ),
@@ -1448,10 +1854,10 @@ class _SalesScreenState extends State<SalesScreen> {
                         child: Scrollbar(
                           thumbVisibility: true,
                           child: ListView.builder(
-                            itemCount: cart.values.length,
+                            itemCount: cart.length,
                             itemBuilder: (context, index) {
-                              final item = cart.values.toList()[index];
-                              return _buildCartItemRow(index + 1, item, salesProvider);
+                              final entry = cart.entries.elementAt(index);
+                              return _buildCartItemRow(index + 1, entry.key, entry.value, salesProvider);
                             },
                           ),
                         ),
@@ -1474,7 +1880,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     Expanded(
                       child: _buildExpandableButton(
                         icon: LucideIcons.tag,
-                        label: 'Khuyến mãi',
+                        label: AppLocalizations.of(context)!.promotion,
                         onTap: () => _showDiscountDialog(salesProvider),
                       ),
                     ),
@@ -1482,10 +1888,10 @@ class _SalesScreenState extends State<SalesScreen> {
                     Expanded(
                       child: _buildExpandableButton(
                         icon: LucideIcons.printer,
-                        label: 'In',
+                        label: AppLocalizations.of(context)!.printLabel,
                         onTap: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Tính năng đang phát triển'), backgroundColor: Colors.orange),
+                            SnackBar(content: Text(AppLocalizations.of(context)!.featureInDevelopment), backgroundColor: Colors.orange),
                           );
                         },
                       ),
@@ -1494,10 +1900,10 @@ class _SalesScreenState extends State<SalesScreen> {
                     Expanded(
                       child: _buildExpandableButton(
                         icon: LucideIcons.dollarSign,
-                        label: 'Chọn bảng giá',
+                        label: AppLocalizations.of(context)!.selectPriceList,
                         onTap: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Tính năng đang phát triển'), backgroundColor: Colors.orange),
+                            SnackBar(content: Text(AppLocalizations.of(context)!.featureInDevelopment), backgroundColor: Colors.orange),
                           );
                         },
                       ),
@@ -1506,10 +1912,10 @@ class _SalesScreenState extends State<SalesScreen> {
                     Expanded(
                       child: _buildExpandableButton(
                         icon: LucideIcons.truck,
-                        label: 'Giao hàng',
+                        label: AppLocalizations.of(context)!.deliveryLabel,
                         onTap: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Tính năng đang phát triển'), backgroundColor: Colors.orange),
+                            SnackBar(content: Text(AppLocalizations.of(context)!.featureInDevelopment), backgroundColor: Colors.orange),
                           );
                         },
                       ),
@@ -1523,7 +1929,129 @@ class _SalesScreenState extends State<SalesScreen> {
       );
     }
 
-    // Mobile: giữ layout cuộn toàn bộ như cũ
+    // Mobile: khi showCartListInPanel = false (FAB layout) dùng Column + Expanded; ngược lại cuộn như cũ
+    final mobileHeader = Container(
+      color: Colors.white,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _tabs.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == _tabs.length) {
+                        return IconButton(
+                          icon: const Icon(LucideIcons.plus, size: 18),
+                          color: Colors.grey[400],
+                          onPressed: _addNewTab,
+                          padding: const EdgeInsets.all(8),
+                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        );
+                      }
+                      final tab = _tabs[index];
+                      final isActive = tab.id == _activeTabId;
+                      return GestureDetector(
+                        onTap: () => _setActiveTab(tab.id),
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isActive ? const Color(0xFFEFF6FF) : Colors.transparent,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(8),
+                              topRight: Radius.circular(8),
+                            ),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: isActive ? const Color(0xFF2563EB) : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                tab.name,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                                  color: isActive ? const Color(0xFF2563EB) : Colors.grey[500],
+                                ),
+                              ),
+                              if (_tabs.length > 1) ...[
+                                const SizedBox(width: 6),
+                                GestureDetector(
+                                  onTap: () => _removeTab(tab.id),
+                                  child: Icon(
+                                    LucideIcons.x,
+                                    size: 12,
+                                    color: isActive ? const Color(0xFF2563EB) : Colors.grey[400],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _showProductSelection,
+                icon: const Icon(LucideIcons.plus, size: 20),
+                label: Text(AppLocalizations.of(context)!.addProductToCart),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!showCartListInPanel) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          mobileHeader,
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.shoppingBag, size: 48, color: Colors.grey[300]),
+                  const SizedBox(height: 12),
+                  Text(
+                    AppLocalizations.of(context)!.pressCartToPay,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Scrollbar(
       controller: _leftPanelScrollController,
       thumbVisibility: true,
@@ -1532,101 +2060,7 @@ class _SalesScreenState extends State<SalesScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              color: Colors.white,
-              child: Column(
-                children: [
-                  Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _tabs.length + 1,
-                            itemBuilder: (context, index) {
-                              if (index == _tabs.length) {
-                                return IconButton(
-                                  icon: const Icon(LucideIcons.plus, size: 18),
-                                  color: Colors.grey[400],
-                                  onPressed: _addNewTab,
-                                  padding: const EdgeInsets.all(8),
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                );
-                              }
-                              final tab = _tabs[index];
-                              final isActive = tab.id == _activeTabId;
-                              return GestureDetector(
-                                onTap: () => _setActiveTab(tab.id),
-                                child: Container(
-                                  margin: const EdgeInsets.only(right: 2),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: isActive ? const Color(0xFFEFF6FF) : Colors.transparent,
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(8),
-                                      topRight: Radius.circular(8),
-                                    ),
-                                    border: Border(
-                                      bottom: BorderSide(
-                                        color: isActive ? const Color(0xFF2563EB) : Colors.transparent,
-                                        width: 2,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        tab.name,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                                          color: isActive ? const Color(0xFF2563EB) : Colors.grey[500],
-                                        ),
-                                      ),
-                                      if (_tabs.length > 1) ...[
-                                        const SizedBox(width: 6),
-                                        GestureDetector(
-                                          onTap: () => _removeTab(tab.id),
-                                          child: Icon(
-                                            LucideIcons.x,
-                                            size: 12,
-                                            color: isActive ? const Color(0xFF2563EB) : Colors.grey[400],
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _showProductSelection,
-                        icon: const Icon(LucideIcons.plus, size: 20),
-                        label: const Text('Thêm sản phẩm vào giỏ'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF2563EB),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            mobileHeader,
             Consumer<SalesProvider>(
               builder: (context, salesProvider, child) {
                 final cart = salesProvider.getCart(_activeTabId);
@@ -1644,7 +2078,7 @@ class _SalesScreenState extends State<SalesScreen> {
                             Icon(LucideIcons.shoppingCart, size: 48, color: Colors.grey[300]),
                             const SizedBox(height: 16),
                             Text(
-                              'Chưa có sản phẩm nào trong giỏ hàng',
+                              AppLocalizations.of(context)!.emptyCartHint,
                               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey[400]),
                             ),
                           ],
@@ -1677,23 +2111,25 @@ class _SalesScreenState extends State<SalesScreen> {
   /// Giỏ hàng Mobile: ListView.builder với Card cho từng sản phẩm.
   /// shrinkWrap + NeverScrollableScrollPhysics khi nằm trong SingleChildScrollView của left panel.
   Widget _buildMobileCartList(SalesProvider salesProvider, Map<String, SaleItem> cart) {
-    final list = cart.values.toList();
+    final entries = cart.entries.toList();
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      itemCount: list.length,
+      itemCount: entries.length,
       itemBuilder: (context, index) {
+        final entry = entries[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 10),
-          child: _buildMobileCartCard(list[index], salesProvider),
+          child: _buildMobileCartCard(entry.key, entry.value, salesProvider),
         );
       },
     );
   }
 
   /// Một Card sản phẩm trên Mobile: Tên (bold), Đơn giá, Thành tiền; nút +/- lớn bên phải.
-  Widget _buildMobileCartCard(SaleItem item, SalesProvider salesProvider) {
+  /// [cartKey] Key trong map giỏ (productId hoặc productId_batchName_expireDate cho sản phẩm theo lô).
+  Widget _buildMobileCartCard(String cartKey, SaleItem item, SalesProvider salesProvider) {
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(
@@ -1749,12 +2185,12 @@ class _SalesScreenState extends State<SalesScreen> {
                     onPressed: () {
                       if (item.quantity > 1) {
                         salesProvider.updateCartItemQuantity(
-                          item.productId,
+                          cartKey,
                           item.quantity - 1.0,
                           tabId: _activeTabId,
                         );
                       } else {
-                        salesProvider.removeFromCart(item.productId, tabId: _activeTabId);
+                        salesProvider.removeFromCart(cartKey, tabId: _activeTabId);
                       }
                     },
                     icon: const Icon(Icons.remove, size: 22),
@@ -1768,7 +2204,7 @@ class _SalesScreenState extends State<SalesScreen> {
                   ),
                 ),
                 InkWell(
-                  onTap: () => _showQuantityDialogMobile(item, salesProvider),
+                  onTap: () => _showQuantityDialogMobile(cartKey, item, salesProvider),
                   borderRadius: BorderRadius.circular(8),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1789,7 +2225,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     child: IconButton(
                       onPressed: () {
                         salesProvider.updateCartItemQuantity(
-                          item.productId,
+                          cartKey,
                           item.quantity + 1.0,
                           tabId: _activeTabId,
                         );
@@ -1807,7 +2243,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 const SizedBox(width: 4),
                 IconButton(
                   onPressed: () =>
-                      salesProvider.removeFromCart(item.productId, tabId: _activeTabId),
+                      salesProvider.removeFromCart(cartKey, tabId: _activeTabId),
                   icon: const Icon(LucideIcons.trash2, size: 20),
                   color: Colors.grey[500],
                   style: IconButton.styleFrom(
@@ -1825,7 +2261,8 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  Widget _buildCartItemRow(int index, SaleItem item, SalesProvider salesProvider) {
+  /// [cartKey] Key trong map giỏ (productId hoặc productId_batchName_expireDate cho sản phẩm theo lô).
+  Widget _buildCartItemRow(int index, String cartKey, SaleItem item, SalesProvider salesProvider) {
     return Container(
       decoration: BoxDecoration(
         border: Border(
@@ -1859,7 +2296,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     child: IconButton(
                       icon: const Icon(LucideIcons.trash2, size: 16),
                       color: Colors.grey[300],
-                      onPressed: () => salesProvider.removeFromCart(item.productId, tabId: _activeTabId),
+                      onPressed: () => salesProvider.removeFromCart(cartKey, tabId: _activeTabId),
                     ),
                   ),
                 ),
@@ -1896,7 +2333,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        'Cái', // ignore: todo - TODO: Get from product
+                        AppLocalizations.of(context)!.defaultUnit, // ignore: todo - TODO: Get from product
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
@@ -1924,9 +2361,9 @@ class _SalesScreenState extends State<SalesScreen> {
                               icon: const Text('-', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                               onPressed: () {
                                 if (item.quantity > 1) {
-                                  salesProvider.updateCartItemQuantity(item.productId, item.quantity - 1.0, tabId: _activeTabId);
+                                  salesProvider.updateCartItemQuantity(cartKey, item.quantity - 1.0, tabId: _activeTabId);
                                 } else {
-                                  salesProvider.removeFromCart(item.productId, tabId: _activeTabId);
+                                  salesProvider.removeFromCart(cartKey, tabId: _activeTabId);
                                 }
                               },
                               style: IconButton.styleFrom(
@@ -1937,7 +2374,7 @@ class _SalesScreenState extends State<SalesScreen> {
                             ),
                           ),
                           InkWell(
-                            onTap: () => _showQuantityDialogDesktop(item, salesProvider),
+                            onTap: () => _showQuantityDialogDesktop(cartKey, item, salesProvider),
                             borderRadius: BorderRadius.circular(8),
                             child: Container(
                               width: 48,
@@ -1960,7 +2397,7 @@ class _SalesScreenState extends State<SalesScreen> {
                               child: IconButton(
                                 icon: const Text('+', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                                 onPressed: () {
-                                  salesProvider.updateCartItemQuantity(item.productId, item.quantity + 1.0, tabId: _activeTabId);
+                                  salesProvider.updateCartItemQuantity(cartKey, item.quantity + 1.0, tabId: _activeTabId);
                                 },
                                 style: IconButton.styleFrom(
                                   padding: EdgeInsets.zero,
@@ -2071,6 +2508,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         _customerNameController.text = salesProvider.getCustomerName(_activeTabId) ?? '';
                         _customerPhoneController.text = salesProvider.getCustomerPhone(_activeTabId) ?? '';
                         _customerAddressController.text = salesProvider.getCustomerAddress(_activeTabId) ?? '';
+                        _customerTaxCodeController.text = salesProvider.getCustomerTaxCode(_activeTabId) ?? '';
                       }
                       setState(() {
                         _isCustomerInfoExpanded = !_isCustomerInfoExpanded;
@@ -2082,9 +2520,9 @@ class _SalesScreenState extends State<SalesScreen> {
                           : LucideIcons.chevronDown,
                       size: 20,
                     ),
-                    label: const Text(
-                      'Thông tin khách hàng',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    label: Text(
+                      AppLocalizations.of(context)!.customerInfo,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                     ),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
@@ -2113,13 +2551,13 @@ class _SalesScreenState extends State<SalesScreen> {
                                   children: [
                                     // Số điện thoại - Tìm kiếm ngay, gợi ý hiện popup Overlay sát dưới ô
                                     RepaintBoundary(
-                                      key: _customerPhoneFieldKey,
+                                      key: _customerPhoneFieldKeyDesktop,
                                       child: TextField(
                                         controller: _customerPhoneController,
                                         focusNode: _customerPhoneFocusNode,
                                         keyboardType: TextInputType.phone,
                                         decoration: InputDecoration(
-                                          labelText: 'Số điện thoại',
+                                          labelText: AppLocalizations.of(context)!.phone,
                                           labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                                           border: OutlineInputBorder(
                                             borderRadius: BorderRadius.circular(8),
@@ -2147,7 +2585,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                     TextField(
                                       controller: _customerNameController,
                                       decoration: InputDecoration(
-                                        labelText: 'Tên khách hàng',
+                                        labelText: AppLocalizations.of(context)!.customerName,
                                         labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                                         border: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(8),
@@ -2170,6 +2608,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                           salesProvider.clearCustomerSelection(tabId: _activeTabId);
                                           _customerPhoneController.clear();
                                           _customerAddressController.clear();
+                                          _customerTaxCodeController.clear();
                                         }
                                         salesProvider.setCustomerName(value.isEmpty ? null : value, tabId: _activeTabId);
                                       },
@@ -2179,7 +2618,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                     TextField(
                                       controller: _customerAddressController,
                                       decoration: InputDecoration(
-                                        labelText: 'Địa chỉ',
+                                        labelText: AppLocalizations.of(context)!.address,
                                         labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                                         border: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(8),
@@ -2200,6 +2639,33 @@ class _SalesScreenState extends State<SalesScreen> {
                                         salesProvider.setCustomerAddress(value.isEmpty ? null : value, tabId: _activeTabId);
                                       },
                                     ),
+                                    const SizedBox(height: 18),
+                                    // MST (Mã số thuế) - Khi khách yêu cầu xuất hóa đơn
+                                    TextField(
+                                      controller: _customerTaxCodeController,
+                                      keyboardType: TextInputType.text,
+                                      decoration: InputDecoration(
+                                        labelText: AppLocalizations.of(context)!.taxCodeForInvoice,
+                                        labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
+                                        ),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      ),
+                                      style: const TextStyle(fontSize: 15),
+                                      onChanged: (value) {
+                                        salesProvider.setCustomerTaxCode(value.isEmpty ? null : value, tabId: _activeTabId);
+                                      },
+                                    ),
                                     const SizedBox(height: 20),
                                     // Nút Xác nhận để ẩn lại
                                     SizedBox(
@@ -2216,8 +2682,8 @@ class _SalesScreenState extends State<SalesScreen> {
                                             borderRadius: BorderRadius.circular(10),
                                           ),
                                         ),
-                                        child: const Text(
-                                          'Xác nhận',
+                                        child: Text(
+                                          AppLocalizations.of(context)!.confirmLabel,
                                           style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w600,
@@ -2265,7 +2731,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         
                         return Column(
                           children: [
-                            _buildSummaryRow('Tổng tiền hàng', '${_formatPrice(totalBeforeDiscount)}đ', Colors.grey[600]!),
+                            _buildSummaryRow(AppLocalizations.of(context)!.totalBeforeDiscount, '${_formatPrice(totalBeforeDiscount)}đ', Colors.grey[600]!),
                             const SizedBox(height: 12),
                             // Row chiết khấu có thể nhấn vào
                             InkWell(
@@ -2301,7 +2767,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
-                                          'Giảm giá',
+                                          AppLocalizations.of(context)!.discountLabel,
                                           style: TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w500,
@@ -2317,7 +2783,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                         Text(
                                           discountAmount > 0 
                                               ? '-${_formatPrice(discountAmount)}đ' 
-                                              : 'Nhấn để thêm',
+                                              : AppLocalizations.of(context)!.tapToAdd,
                                           style: TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.bold,
@@ -2345,7 +2811,7 @@ class _SalesScreenState extends State<SalesScreen> {
                               Colors.grey[600]!,
                             ),
                             const SizedBox(height: 12),
-                            _buildSummaryRow('Tổng cộng', '${_formatPrice(finalTotal)}đ', const Color(0xFF2563EB)),
+                            _buildSummaryRow(AppLocalizations.of(context)!.totalLabel, '${_formatPrice(finalTotal)}đ', const Color(0xFF2563EB)),
                           ],
                         );
                       },
@@ -2383,9 +2849,9 @@ class _SalesScreenState extends State<SalesScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        const Text(
-                          'KHÁCH CẦN TRẢ',
-                          style: TextStyle(
+                        Text(
+                          AppLocalizations.of(context)!.customerToPay,
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
                             color: Color(0xFF1E293B),
@@ -2452,9 +2918,9 @@ class _SalesScreenState extends State<SalesScreen> {
                                   size: 24,
                                 ),
                                 const SizedBox(width: 12),
-                                const Text(
-                                  'THANH TOÁN (F9)',
-                                  style: TextStyle(
+                                Text(
+                                  AppLocalizations.of(context)!.payButtonShort,
+                                  style: const TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w900,
                                     color: Colors.white,
@@ -2539,41 +3005,41 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   /// Desktop: bấm vào số lượng → dialog nhập số trực tiếp (TextField).
-  Future<void> _showQuantityDialogDesktop(SaleItem item, SalesProvider salesProvider) async {
+  Future<void> _showQuantityDialogDesktop(String cartKey, SaleItem item, SalesProvider salesProvider) async {
     final qtyController = TextEditingController(text: item.quantity.toStringAsFixed(0));
     await showDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Số lượng'),
+          title: Text(AppLocalizations.of(context)!.quantity),
           content: TextField(
             controller: qtyController,
             keyboardType: const TextInputType.numberWithOptions(decimal: false),
             autofocus: true,
-            decoration: const InputDecoration(
-              hintText: 'Nhập số lượng',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              hintText: AppLocalizations.of(context)!.enterQuantity,
+              border: const OutlineInputBorder(),
             ),
             onSubmitted: (value) => Navigator.of(dialogContext).pop(),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Hủy'),
+              child: Text(AppLocalizations.of(context)!.cancel),
             ),
             FilledButton(
               onPressed: () {
                 final qty = double.tryParse(qtyController.text.trim()) ?? 0;
                 if (qty <= 0) {
-                  salesProvider.removeFromCart(item.productId, tabId: _activeTabId);
+                  salesProvider.removeFromCart(cartKey, tabId: _activeTabId);
                   Navigator.of(dialogContext).pop();
                   return;
                 }
                 final effective = _effectiveQuantityForCart(qty, item.productId);
-                salesProvider.updateCartItemQuantity(item.productId, effective, tabId: _activeTabId);
+                salesProvider.updateCartItemQuantity(cartKey, effective, tabId: _activeTabId);
                 Navigator.of(dialogContext).pop();
               },
-              child: const Text('Xong'),
+              child: Text(AppLocalizations.of(context)!.done),
             ),
           ],
         );
@@ -2583,7 +3049,7 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   /// Mobile: bấm vào số lượng → popup ô text + 10 nút số (0–9).
-  Future<void> _showQuantityDialogMobile(SaleItem item, SalesProvider salesProvider) async {
+  Future<void> _showQuantityDialogMobile(String cartKey, SaleItem item, SalesProvider salesProvider) async {
     final qtyController = TextEditingController(text: item.quantity.toStringAsFixed(0));
     await showDialog(
       context: context,
@@ -2623,7 +3089,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           borderRadius: BorderRadius.circular(8),
                           onTap: () {
                             final text = qtyController.text;
-                            qtyController.text = text + '$digit';
+                            qtyController.text = '$text$digit';
                             qtyController.selection = TextSelection.collapsed(offset: qtyController.text.length);
                             setState(() {});
                           },
@@ -2642,21 +3108,21 @@ class _SalesScreenState extends State<SalesScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Hủy'),
+                  child: Text(AppLocalizations.of(context)!.cancel),
                 ),
                 FilledButton(
                   onPressed: () {
                     final qty = double.tryParse(qtyController.text.trim()) ?? 0;
                     if (qty <= 0) {
-                      salesProvider.removeFromCart(item.productId, tabId: _activeTabId);
+                      salesProvider.removeFromCart(cartKey, tabId: _activeTabId);
                       Navigator.of(dialogContext).pop();
                       return;
                     }
                     final effective = _effectiveQuantityForCart(qty, item.productId);
-                    salesProvider.updateCartItemQuantity(item.productId, effective, tabId: _activeTabId);
+                    salesProvider.updateCartItemQuantity(cartKey, effective, tabId: _activeTabId);
                     Navigator.of(dialogContext).pop();
                   },
-                  child: const Text('Xong'),
+                  child: Text(AppLocalizations.of(context)!.done),
                 ),
               ],
             );
@@ -2834,8 +3300,8 @@ class _SalesScreenState extends State<SalesScreen> {
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
                         hintText: discountTypeIsPercentage 
-                            ? 'Nhập % (ví dụ: 10)' 
-                            : 'Nhập số tiền (ví dụ: 50000)',
+                            ? AppLocalizations.of(context)!.enterPercentExample 
+                            : AppLocalizations.of(context)!.enterAmountExample,
                         prefixIcon: Icon(
                           discountTypeIsPercentage ? LucideIcons.percent : LucideIcons.coins,
                           size: 18,
@@ -2934,7 +3400,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     discountController.dispose();
                     Navigator.pop(context);
                   },
-                  child: const Text('Hủy'),
+                  child: Text(AppLocalizations.of(context)!.cancel),
                 ),
                 TextButton(
                   onPressed: () {
@@ -2949,7 +3415,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     discountController.dispose();
                     Navigator.pop(context);
                   },
-                  child: const Text('Xóa chiết khấu', style: TextStyle(color: Colors.red)),
+                  child: Text(AppLocalizations.of(context)!.removeDiscount, style: TextStyle(color: Colors.red)),
                 ),
                 ElevatedButton(
                   onPressed: () {
@@ -2960,8 +3426,8 @@ class _SalesScreenState extends State<SalesScreen> {
                     
                     if (newPrice < 0) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Giá bán không được âm'),
+                        SnackBar(
+                          content: Text(AppLocalizations.of(context)!.priceCannotBeNegative),
                           backgroundColor: Colors.red,
                         ),
                       );
@@ -2970,8 +3436,8 @@ class _SalesScreenState extends State<SalesScreen> {
                     
                     if (discountValue != null && discountValue < 0) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Chiết khấu không được âm'),
+                        SnackBar(
+                          content: Text(AppLocalizations.of(context)!.discountCannotBeNegative),
                           backgroundColor: Colors.red,
                         ),
                       );
@@ -2980,8 +3446,8 @@ class _SalesScreenState extends State<SalesScreen> {
                     
                     if (discountTypeIsPercentage && discountValue != null && discountValue > 100) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Phần trăm giảm giá không được vượt quá 100%'),
+                        SnackBar(
+                          content: Text(AppLocalizations.of(context)!.discountPercentExceeds100),
                           backgroundColor: Colors.red,
                         ),
                       );
@@ -3007,7 +3473,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     backgroundColor: const Color(0xFF2563EB),
                     foregroundColor: Colors.white,
                   ),
-                  child: const Text('Xác nhận'),
+                  child: Text(AppLocalizations.of(context)!.confirm),
                 ),
               ],
             );
@@ -3049,11 +3515,11 @@ class _SalesScreenState extends State<SalesScreen> {
             }
             
             return AlertDialog(
-          title: const Row(
+          title: Row(
             children: [
-              Icon(LucideIcons.tag, size: 20, color: Color(0xFFF97316)),
-              SizedBox(width: 8),
-              Text('Chiết khấu đơn hàng'),
+              const Icon(LucideIcons.tag, size: 20, color: Color(0xFFF97316)),
+              const SizedBox(width: 8),
+              Text(AppLocalizations.of(context)!.orderDiscountTitle),
             ],
           ),
           content: Column(
@@ -3100,7 +3566,7 @@ class _SalesScreenState extends State<SalesScreen> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                'Phần trăm (%)',
+                                AppLocalizations.of(context)!.percentLabel,
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: discountTypeIsPercentage 
@@ -3171,8 +3637,8 @@ class _SalesScreenState extends State<SalesScreen> {
                 controller: discountController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
-                  labelText: discountTypeIsPercentage ? 'Phần trăm giảm giá (%)' : 'Số tiền giảm giá (VNĐ)',
-                  hintText: discountTypeIsPercentage ? 'Nhập % (ví dụ: 10)' : 'Nhập số tiền (ví dụ: 50000)',
+                  labelText: discountTypeIsPercentage ? AppLocalizations.of(context)!.discountPercentLabel : AppLocalizations.of(context)!.discountAmountLabel,
+                  hintText: discountTypeIsPercentage ? AppLocalizations.of(context)!.enterPercentExample : AppLocalizations.of(context)!.enterAmountExample,
                   prefixIcon: Icon(
                     discountTypeIsPercentage ? LucideIcons.percent : LucideIcons.coins,
                     size: 18,
@@ -3257,7 +3723,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 discountController.dispose();
                 Navigator.pop(context);
               },
-              child: const Text('Hủy'),
+              child: Text(AppLocalizations.of(context)!.cancel),
             ),
             TextButton(
               onPressed: () {
@@ -3266,7 +3732,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 discountController.dispose();
                 Navigator.pop(context);
               },
-              child: const Text('Xóa', style: TextStyle(color: Colors.red)),
+              child: Text(AppLocalizations.of(context)!.delete, style: TextStyle(color: Colors.red)),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -3275,8 +3741,8 @@ class _SalesScreenState extends State<SalesScreen> {
                   // Validate giá trị
                   if (discountTypeIsPercentage && value > 100) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Phần trăm giảm giá không được vượt quá 100%'),
+                      SnackBar(
+                        content: Text(AppLocalizations.of(context)!.discountPercentExceeds100),
                         backgroundColor: Colors.red,
                       ),
                     );
@@ -3306,11 +3772,11 @@ class _SalesScreenState extends State<SalesScreen> {
                     final approved = await showDialog<bool>(
                       context: context,
                       builder: (context) => AlertDialog(
-                        title: const Row(
+                        title: Row(
                           children: [
-                            Icon(Icons.warning, color: Colors.orange),
-                            SizedBox(width: 8),
-                            Text('Yêu cầu phê duyệt'),
+                            const Icon(Icons.warning, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Text(AppLocalizations.of(context)!.approvalRequired),
                           ],
                         ),
                         content: Column(
@@ -3318,13 +3784,13 @@ class _SalesScreenState extends State<SalesScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Chiết khấu ${actualDiscountPercent.toStringAsFixed(1)}% vượt quá ngưỡng cho phép (10%).',
+                              AppLocalizations.of(context)!.discountExceedsThreshold(actualDiscountPercent.toStringAsFixed(1)),
                               style: const TextStyle(fontSize: 14),
                             ),
                             const SizedBox(height: 8),
-                            const Text(
-                              'Chỉ Admin/Manager mới có quyền phê duyệt chiết khấu này.',
-                              style: TextStyle(
+                            Text(
+                              AppLocalizations.of(context)!.onlyAdminCanApprove,
+                              style: const TextStyle(
                                 fontSize: 12,
                                 color: Colors.red,
                                 fontWeight: FontWeight.bold,
@@ -3335,7 +3801,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Hủy'),
+                            child: Text(AppLocalizations.of(context)!.cancel),
                           ),
                         ],
                       ),
@@ -3362,7 +3828,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text(salesProvider.errorMessage ?? 'Không thể áp dụng chiết khấu'),
+                        content: Text(salesProvider.errorMessage ?? AppLocalizations.of(context)!.cannotApplyDiscount),
                         backgroundColor: Colors.red,
                       ),
                     );
@@ -3379,7 +3845,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 backgroundColor: const Color(0xFF2563EB),
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Xác nhận'),
+              child: Text(AppLocalizations.of(context)!.confirm),
             ),
           ],
             );
@@ -3406,31 +3872,6 @@ class _SalesScreenState extends State<SalesScreen> {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.bold,
-            color: valueColor,
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Dòng tổng trong sticky bottom mobile (font nhỏ, gọn).
-  Widget _buildMobileSummaryRow(String label, String value, Color valueColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF64748B),
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
             color: valueColor,
           ),
         ),
@@ -3479,7 +3920,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        title: const Text('Chọn sản phẩm'),
+        title: Text(AppLocalizations.of(context)!.selectProduct),
       ),
       body: Consumer<ProductProvider>(
         builder: (context, productProvider, child) {
@@ -3499,11 +3940,11 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                 child: TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Tìm kiếm sản phẩm...',
+                    hintText: AppLocalizations.of(context)!.searchProduct,
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: IconButton(
                       icon: const Icon(LucideIcons.qrCode, size: 22),
-                      tooltip: 'Quét mã vạch',
+                      tooltip: AppLocalizations.of(context)!.scanBarcode,
                       onPressed: () async {
                         final barcode = await Navigator.push<String>(
                           context,
@@ -3551,8 +3992,8 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                             Navigator.pop(context, product);
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Sản phẩm tạm hết hàng'),
+                              SnackBar(
+                                content: Text(AppLocalizations.of(context)!.productOutOfStock),
                                 backgroundColor: Colors.orange,
                               ),
                             );
@@ -3591,7 +4032,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                                 const Icon(Icons.add_shopping_cart, color: Colors.green, size: 24)
                               else
                                 Text(
-                                  'Hết hàng',
+                                  AppLocalizations.of(context)!.outOfStock,
                                   style: TextStyle(
                                     color: Colors.red[700],
                                     fontWeight: FontWeight.w500,
@@ -3635,7 +4076,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Quét mã vạch'),
+        title: Text(AppLocalizations.of(context)!.scanBarcode),
       ),
       body: Stack(
         children: [

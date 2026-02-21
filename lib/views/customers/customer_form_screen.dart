@@ -4,7 +4,6 @@ import '../../controllers/customer_provider.dart';
 import '../../models/customer_model.dart';
 import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
-import '../../widgets/ad_banner_widget.dart';
 
 /// Màn hình form thêm/sửa khách hàng (mobile/desktop theo platform).
 class CustomerFormScreen extends StatefulWidget {
@@ -101,7 +100,6 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
       ),
       body: Column(
         children: [
-          const AdBannerWidget(),
           Expanded(
             child: ResponsiveContainer(
               padding: const EdgeInsets.all(16),

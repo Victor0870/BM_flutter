@@ -11,19 +11,25 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Admin: có document trong admins/{uid} với field admin == true (tạo thủ công trong Console)
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.admin == true;
+    }
+
+    // Collection admins: mỗi user chỉ đọc được document của chính mình; không cho client ghi (chỉ Console/Admin SDK)
+    match /admins/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if false;
+    }
+
     // Rules cho collection shops
-    // Chỉ user có UID khớp với document ID mới có quyền đọc/ghi
+    // Owner đọc/ghi shop của mình; Admin đọc và cập nhật mọi shop (để nâng cấp PRO)
     match /shops/{userId} {
-      // Cho phép đọc nếu là owner
-      allow read: if isOwner(userId);
-      
-      // Cho phép tạo mới nếu là owner
+      allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId);
-      
-      // Cho phép cập nhật nếu là owner
-      allow update: if isOwner(userId);
-      
-      // Cho phép xóa nếu là owner
+      allow update: if isOwner(userId) || isAdmin();
       allow delete: if isOwner(userId);
 
       // Rules cho subcollection products của shop
@@ -49,6 +55,37 @@ service cloud.firestore {
         // Chỉ owner của shop mới có quyền đọc/ghi categories
         allow read, write: if isOwner(userId);
       }
+
+      // Rules cho subcollection customers của shop (danh sách KH, chi tiết, popup sửa)
+      match /customers/{customerId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Rules cho subcollection customer_groups của shop (nhóm KH, lọc, cột hiển thị)
+      match /customer_groups/{groupId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Rules cho subcollection employee_groups của shop
+      match /employee_groups/{groupId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Collection users (root): dùng cho đăng nhập, shopId, role, isApproved (pending staff)
+    // - User đọc/cập nhật chính mình; owner shop đọc/cập nhật nhân viên thuộc shop; Admin đọc tất cả (để thống kê)
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId
+        || resource.data.shopId == request.auth.uid
+        || isAdmin()
+      );
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (
+        request.auth.uid == userId
+        || resource.data.shopId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && request.auth.uid == userId;
     }
 
     // Collection notifications (root): owner hoặc staff của shop có thể đọc
@@ -62,6 +99,13 @@ service cloud.firestore {
         resource.data.shopId == request.auth.uid
         || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId
       );
+    }
+
+    // system_settings: cấu hình toàn hệ thống (vd. isTest cho AdMob / eInvoice)
+    // Mọi user đã đăng nhập được đọc; chỉ admin (sau này) mới ghi nếu cần
+    match /system_settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
     }
 
     // Deny tất cả các truy cập khác

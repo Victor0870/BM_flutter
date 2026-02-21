@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/auth_provider.dart';
+import '../../controllers/locale_provider.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Màn hình đăng nhập/đăng ký cho Desktop (Windows/Mac/Linux/Web).
 class AuthScreenDesktop extends StatefulWidget {
@@ -58,8 +60,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
     if (!authProvider.isFirebaseReady) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Firebase chưa sẵn sàng. Vui lòng thử lại sau.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.firebaseNotReady),
             backgroundColor: Colors.red,
           ),
         );
@@ -76,15 +78,15 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
       if (mounted) {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Đăng nhập thành công!'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.loginSuccess),
               backgroundColor: Colors.green,
             ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(authProvider.errorMessage ?? 'Đăng nhập thất bại'),
+              content: Text(authProvider.errorMessage ?? AppLocalizations.of(context)!.loginFailed),
               backgroundColor: Colors.red,
             ),
           );
@@ -94,8 +96,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
       if (_passwordController.text != _confirmPasswordController.text) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Mật khẩu xác nhận không khớp'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.passwordMismatch),
               backgroundColor: Colors.red,
             ),
           );
@@ -112,8 +114,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
         if (_shopIdController.text.trim().isEmpty) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Vui lòng nhập Shop ID của cửa hàng'),
+              SnackBar(
+                content: Text(AppLocalizations.of(context)!.pleaseEnterShopIdDesktop),
                 backgroundColor: Colors.red,
               ),
             );
@@ -129,16 +131,16 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
       if (mounted) {
         if (success) {
           final message = _isOwner
-              ? 'Đăng ký thành công! Đang tạo cửa hàng...'
+              ? AppLocalizations.of(context)!.registerSuccess
               : (authProvider.errorMessage ??
-                  'Đăng ký thành công, vui lòng đợi Admin phê duyệt.');
+                  AppLocalizations.of(context)!.registerSuccessStaff);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(message), backgroundColor: Colors.green),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(authProvider.errorMessage ?? 'Đăng ký thất bại'),
+              content: Text(authProvider.errorMessage ?? AppLocalizations.of(context)!.registerFailed),
               backgroundColor: Colors.red,
             ),
           );
@@ -170,7 +172,7 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'BizMate POS',
+                      AppLocalizations.of(context)!.appTitle,
                       style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                             color: Theme.of(context).colorScheme.primary,
@@ -180,10 +182,10 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                     const SizedBox(height: 8),
                     Text(
                       _isLogin
-                          ? 'Đăng nhập vào tài khoản'
+                          ? AppLocalizations.of(context)!.loginToAccount
                           : (_isOwner
-                              ? 'Đăng ký Chủ cửa hàng'
-                              : 'Đăng ký Nhân viên'),
+                              ? AppLocalizations.of(context)!.registerOwner
+                              : AppLocalizations.of(context)!.registerStaff),
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: Colors.grey[600],
                           ),
@@ -195,13 +197,13 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           ChoiceChip(
-                            label: const Text('Chủ shop'),
+                            label: Text(AppLocalizations.of(context)!.ownerChip),
                             selected: _isOwner,
                             onSelected: (_) => setState(() => _isOwner = true),
                           ),
                           const SizedBox(width: 8),
                           ChoiceChip(
-                            label: const Text('Nhân viên'),
+                            label: Text(AppLocalizations.of(context)!.staffChip),
                             selected: !_isOwner,
                             onSelected: (_) => setState(() => _isOwner = false),
                           ),
@@ -212,8 +214,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                     TextFormField(
                       controller: _emailController,
                       decoration: InputDecoration(
-                        labelText: 'Email',
-                        hintText: 'example@email.com',
+                        labelText: AppLocalizations.of(context)!.email,
+                        hintText: AppLocalizations.of(context)!.emailHint,
                         prefixIcon: const Icon(Icons.email),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -222,8 +224,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Vui lòng nhập email';
-                        if (!v.contains('@')) return 'Email không hợp lệ';
+                        if (v == null || v.trim().isEmpty) return AppLocalizations.of(context)!.pleaseEnterEmail;
+                        if (!v.contains('@')) return AppLocalizations.of(context)!.invalidEmail;
                         return null;
                       },
                     ),
@@ -232,8 +234,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                       TextFormField(
                         controller: _shopIdController,
                         decoration: InputDecoration(
-                          labelText: 'Shop ID',
-                          hintText: 'Nhập Shop ID cửa hàng',
+                          labelText: AppLocalizations.of(context)!.shopId,
+                          hintText: AppLocalizations.of(context)!.shopIdHintDesktop,
                           prefixIcon: const Icon(Icons.store),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -245,7 +247,7 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                     TextFormField(
                       controller: _passwordController,
                       decoration: InputDecoration(
-                        labelText: 'Mật khẩu',
+                        labelText: AppLocalizations.of(context)!.password,
                         prefixIcon: const Icon(Icons.lock),
                         suffixIcon: IconButton(
                           icon: Icon(
@@ -260,8 +262,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                       obscureText: _obscurePassword,
                       textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Vui lòng nhập mật khẩu';
-                        if (!_isLogin && v.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';
+                        if (v == null || v.trim().isEmpty) return AppLocalizations.of(context)!.pleaseEnterPassword;
+                        if (!_isLogin && v.length < 6) return AppLocalizations.of(context)!.passwordMinLength;
                         return null;
                       },
                       onFieldSubmitted: (_) => _isLogin ? _handleSubmit() : null,
@@ -278,7 +280,7 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                             child: GestureDetector(
                               onTap: () => setState(() => _rememberMe = !_rememberMe),
                               child: Text(
-                                'Ghi nhớ tài khoản',
+                                AppLocalizations.of(context)!.rememberAccount,
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
@@ -291,7 +293,7 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                       TextFormField(
                         controller: _confirmPasswordController,
                         decoration: InputDecoration(
-                          labelText: 'Xác nhận mật khẩu',
+                          labelText: AppLocalizations.of(context)!.confirmPassword,
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -309,8 +311,8 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                         obscureText: _obscureConfirmPassword,
                         textInputAction: TextInputAction.done,
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Vui lòng xác nhận mật khẩu';
-                          if (v != _passwordController.text) return 'Mật khẩu xác nhận không khớp';
+                          if (v == null || v.trim().isEmpty) return AppLocalizations.of(context)!.pleaseConfirmPassword;
+                          if (v != _passwordController.text) return AppLocalizations.of(context)!.passwordMismatch;
                           return null;
                         },
                         onFieldSubmitted: (_) => _handleSubmit(),
@@ -333,7 +335,7 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : Text(
-                                _isLogin ? 'Đăng nhập' : 'Đăng ký',
+                                _isLogin ? AppLocalizations.of(context)!.login : AppLocalizations.of(context)!.register,
                                 style: const TextStyle(fontSize: 16),
                               ),
                       ),
@@ -351,9 +353,28 @@ class _AuthScreenDesktopState extends State<AuthScreenDesktop> {
                       },
                       child: Text(
                         _isLogin
-                            ? 'Chưa có tài khoản? Đăng ký ngay'
-                            : 'Đã có tài khoản? Đăng nhập',
+                            ? AppLocalizations.of(context)!.noAccountRegister
+                            : AppLocalizations.of(context)!.haveAccountLogin,
                       ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '🌐',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => context.read<LocaleProvider>().setLocale(const Locale('vi')),
+                          child: Text('Tiếng Việt'),
+                        ),
+                        TextButton(
+                          onPressed: () => context.read<LocaleProvider>().setLocale(const Locale('en')),
+                          child: const Text('English'),
+                        ),
+                      ],
                     ),
                   ],
                 ),

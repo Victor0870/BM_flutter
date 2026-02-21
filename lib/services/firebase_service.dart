@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../models/shop_model.dart';
 import '../models/user_model.dart';
 
@@ -13,6 +14,17 @@ class FirebaseService {
   // Getters
   FirebaseAuth get auth => _auth;
   FirebaseFirestore get firestore => _firestore;
+
+  /// Tải logo cửa hàng lên Firebase Storage (shops/{shopId}/logo.jpg).
+  /// Trả về URL download để lưu vào shop.logoUrl.
+  Future<String> uploadShopLogo(String shopId, Uint8List imageBytes) async {
+    final ref = FirebaseStorage.instance.ref('shops').child(shopId).child('logo.jpg');
+    await ref.putData(
+      imageBytes,
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
+    return ref.getDownloadURL();
+  }
 
   /// Lấy thông tin shop từ Firestore
   Future<ShopModel?> getShopData(String shopId) async {
@@ -145,13 +157,16 @@ class FirebaseService {
     required String uid,
     required bool isApproved,
     String? workingBranchId, // Chi nhánh làm việc chính
+    String? groupId, // Nhóm nhân viên (phân quyền)
   }) async {
     try {
       final updateData = <String, dynamic>{
         'isApproved': isApproved,
         'updatedAt': Timestamp.now(),
       };
-      
+      if (groupId != null) {
+        updateData['groupId'] = groupId.isEmpty ? null : groupId;
+      }
       // Nếu có workingBranchId, thêm vào update
       if (workingBranchId != null && workingBranchId.isNotEmpty) {
         updateData['workingBranchId'] = workingBranchId;
@@ -202,6 +217,30 @@ class FirebaseService {
     } catch (e) {
       debugPrint('Error updating staff working branch: $e');
       rethrow;
+    }
+  }
+
+  /// Lấy trạng thái môi trường test từ Firestore system_settings/isTest.
+  /// Document: { "value": true|false } hoặc { "isTest": true|false }.
+  /// - Dùng cho FPT eInvoice (URL UAT khi true).
+  /// - Dùng cho AdMob: isTest true → hiện quảng cáo với tất cả tài khoản (kiểm thử);
+  ///   isTest false → chỉ hiện quảng cáo ở tài khoản free (!isPro).
+  Future<bool> getIsTestMode() async {
+    try {
+      final doc = await _firestore
+          .collection('system_settings')
+          .doc('isTest')
+          .get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        final value = data['value'] ?? data['isTest'];
+        if (value is bool) return value;
+        if (value is bool?) return value ?? false;
+      }
+      return false; // Mặc định production
+    } catch (e) {
+      debugPrint('Error getting isTest from system_settings: $e');
+      return false;
     }
   }
 

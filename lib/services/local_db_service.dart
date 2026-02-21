@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -14,12 +15,31 @@ import '../models/stock_history_model.dart';
 
 /// Service để quản lý database cục bộ bằng SQLite
 /// Dùng cho gói BASIC (Offline mode)
+/// Cache in-memory để tra cứu <100ms (tìm hàng, chọn biến thể).
 class LocalDbService {
   static final LocalDbService _instance = LocalDbService._internal();
   factory LocalDbService() => _instance;
   LocalDbService._internal();
 
   static Database? _database;
+
+  /// Cache in-memory: ưu tiên tốc độ phản hồi UI (<100ms).
+  static Map<String, ProductModel>? _productByIdCache;
+  static Map<String, ProductModel>? _productByBarcodeCache;
+
+  static void _invalidateProductCache() {
+    _productByIdCache = null;
+    _productByBarcodeCache = null;
+  }
+
+  static void _fillProductCaches(List<ProductModel> products) {
+    _productByIdCache = { for (final p in products) p.id: p };
+    _productByBarcodeCache = {};
+    for (final p in products) {
+      final b = p.barcode?.trim().toLowerCase();
+      if (b != null && b.isNotEmpty) _productByBarcodeCache![b] = p;
+    }
+  }
 
   /// Lấy database instance (singleton)
   Future<Database> get database async {
@@ -40,13 +60,14 @@ class LocalDbService {
 
     final db = await openDatabase(
       path,
-      version: 13, // Tăng version để thêm bảng stock_history
+      version: 15, // 15: thêm bảng app_prefs cho tutorial flags
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
 
     // Kiểm tra và tạo table purchases nếu chưa tồn tại (fix cho database cũ)
     await _ensurePurchasesTableExists(db);
+    await _ensureAppPrefsTableExists(db);
 
     // Đảm bảo columns tồn tại (để xử lý trường hợp database đã tồn tại nhưng chưa migrate đúng)
     await _ensureSalesColumnsExist(db);
@@ -115,6 +136,33 @@ class LocalDbService {
       }
       
       // Thêm các cột hóa đơn điện tử
+      if (!columnNames.contains('totalBeforeDiscount')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN totalBeforeDiscount REAL');
+      }
+      if (!columnNames.contains('discountAmount')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN discountAmount REAL');
+      }
+      if (!columnNames.contains('subTotal')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN subTotal REAL');
+      }
+      if (!columnNames.contains('orderDiscountValue')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN orderDiscountValue REAL');
+      }
+      if (!columnNames.contains('orderDiscountType')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN orderDiscountType TEXT');
+      }
+      if (!columnNames.contains('totalDiscountAmount')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN totalDiscountAmount REAL');
+      }
+      if (!columnNames.contains('discountApprovedBy')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN discountApprovedBy TEXT');
+      }
+      if (!columnNames.contains('vatRate')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN vatRate REAL');
+      }
+      if (!columnNames.contains('taxAmount')) {
+        await db.execute('ALTER TABLE sales ADD COLUMN taxAmount REAL');
+      }
       if (!columnNames.contains('invoiceNo')) {
         await db.execute('''
           ALTER TABLE sales ADD COLUMN invoiceNo TEXT
@@ -138,6 +186,17 @@ class LocalDbService {
           ALTER TABLE sales ADD COLUMN einvoiceUrl TEXT
         ''');
       }
+      // KiotViet: totalPayment (Khách thanh toán), statusValue (Trạng thái đơn)
+      if (!columnNames.contains('totalPayment')) {
+        await db.execute('''
+          ALTER TABLE sales ADD COLUMN totalPayment REAL
+        ''');
+      }
+      if (!columnNames.contains('statusValue')) {
+        await db.execute('''
+          ALTER TABLE sales ADD COLUMN statusValue TEXT
+        ''');
+      }
     } catch (e) {
       // Bỏ qua lỗi nếu columns đã tồn tại
       // debugPrint('Error ensuring sales columns: $e');
@@ -149,7 +208,53 @@ class LocalDbService {
     try {
       final result = await db.rawQuery("PRAGMA table_info(products)");
       final columnNames = result.map((row) => row['name'] as String).toList();
-      
+
+      if (!columnNames.contains('kiotId')) {
+        await db.execute('ALTER TABLE products ADD COLUMN kiotId INTEGER');
+      }
+      if (!columnNames.contains('code')) {
+        await db.execute('ALTER TABLE products ADD COLUMN code TEXT');
+      }
+      if (!columnNames.contains('fullName')) {
+        await db.execute('ALTER TABLE products ADD COLUMN fullName TEXT');
+      }
+      if (!columnNames.contains('categoryName')) {
+        await db.execute('ALTER TABLE products ADD COLUMN categoryName TEXT');
+      }
+      if (!columnNames.contains('images')) {
+        await db.execute('ALTER TABLE products ADD COLUMN images TEXT');
+      }
+      if (!columnNames.contains('masterUnitId')) {
+        await db.execute('ALTER TABLE products ADD COLUMN masterUnitId TEXT');
+      }
+      if (!columnNames.contains('masterProductId')) {
+        await db.execute('ALTER TABLE products ADD COLUMN masterProductId TEXT');
+      }
+      if (!columnNames.contains('hasVariants')) {
+        await db.execute('ALTER TABLE products ADD COLUMN hasVariants INTEGER DEFAULT 0');
+      }
+      if (!columnNames.contains('attributes')) {
+        await db.execute('ALTER TABLE products ADD COLUMN attributes TEXT');
+      }
+      if (!columnNames.contains('inventories')) {
+        await db.execute('ALTER TABLE products ADD COLUMN inventories TEXT');
+      }
+      if (!columnNames.contains('retailerId')) {
+        await db.execute('ALTER TABLE products ADD COLUMN retailerId TEXT');
+      }
+      if (!columnNames.contains('tradeMarkId')) {
+        await db.execute('ALTER TABLE products ADD COLUMN tradeMarkId TEXT');
+      }
+      if (!columnNames.contains('tradeMarkName')) {
+        await db.execute('ALTER TABLE products ADD COLUMN tradeMarkName TEXT');
+      }
+      if (!columnNames.contains('description')) {
+        await db.execute('ALTER TABLE products ADD COLUMN description TEXT');
+      }
+      if (!columnNames.contains('weight')) {
+        await db.execute('ALTER TABLE products ADD COLUMN weight REAL');
+      }
+
       if (!columnNames.contains('categoryId')) {
         await db.execute('''
           ALTER TABLE products ADD COLUMN categoryId TEXT
@@ -189,6 +294,24 @@ class LocalDbService {
       if (!columnNames.contains('branchStock')) {
         await db.execute('''
           ALTER TABLE products ADD COLUMN branchStock TEXT
+        ''');
+      }
+
+      if (!columnNames.contains('groupPrices')) {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN groupPrices TEXT
+        ''');
+      }
+
+      if (!columnNames.contains('isBatchExpireControl')) {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN isBatchExpireControl INTEGER DEFAULT 0
+        ''');
+      }
+
+      if (!columnNames.contains('batchExpires')) {
+        await db.execute('''
+          ALTER TABLE products ADD COLUMN batchExpires TEXT
         ''');
       }
       
@@ -342,6 +465,20 @@ class LocalDbService {
     }
   }
 
+  /// Đảm bảo table app_prefs tồn tại (key-value cho tutorial flags và cài đặt app)
+  Future<void> _ensureAppPrefsTableExists(Database db) async {
+    try {
+      await db.rawQuery('SELECT 1 FROM app_prefs LIMIT 1');
+    } catch (e) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS app_prefs (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      ''');
+    }
+  }
+
   /// Đảm bảo table purchases tồn tại (fix cho database đã tạo từ trước)
   Future<void> _ensurePurchasesTableExists(Database db) async {
     try {
@@ -402,7 +539,10 @@ class LocalDbService {
       await db.execute('''
         CREATE TABLE products (
         id TEXT PRIMARY KEY,
+        kiotId INTEGER,
+        code TEXT,
         name TEXT NOT NULL,
+        fullName TEXT,
         unit TEXT NOT NULL,
         units TEXT,
         price REAL NOT NULL,
@@ -410,22 +550,37 @@ class LocalDbService {
         stock REAL NOT NULL,
         branchPrices TEXT,
         branchStock TEXT,
+        groupPrices TEXT,
         barcode TEXT,
         category TEXT,
         categoryId TEXT,
+        categoryName TEXT,
         manufacturer TEXT,
         sku TEXT,
         imageUrl TEXT,
+        images TEXT,
         minStock REAL,
         maxStock REAL,
+        masterUnitId TEXT,
+        masterProductId TEXT,
+        hasVariants INTEGER DEFAULT 0,
+        attributes TEXT,
+        inventories TEXT,
         variants TEXT,
         isInventoryManaged INTEGER DEFAULT 1,
         isImeiManaged INTEGER DEFAULT 0,
         isBatchManaged INTEGER DEFAULT 0,
+        isBatchExpireControl INTEGER DEFAULT 0,
+        batchExpires TEXT,
         isSellable INTEGER DEFAULT 1,
         createdAt TEXT,
         updatedAt TEXT,
-        isActive INTEGER NOT NULL DEFAULT 1
+        isActive INTEGER NOT NULL DEFAULT 1,
+        retailerId TEXT,
+        tradeMarkId TEXT,
+        tradeMarkName TEXT,
+        description TEXT,
+        weight REAL
       )
     ''');
 
@@ -576,6 +731,14 @@ class LocalDbService {
 
     await db.execute('''
       CREATE INDEX idx_stock_history_type ON stock_history(type)
+    ''');
+
+    // Bảng app_prefs (key-value cho tutorial flags, v.v.)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS app_prefs (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
     ''');
   }
 
@@ -878,6 +1041,128 @@ class LocalDbService {
         // Table có thể đã tồn tại
       }
     }
+
+    if (oldVersion < 14) {
+      // Thêm kiotId và các cột products còn thiếu (fix lỗi thanh toán / đồng bộ KiotViet)
+      await _ensureProductsColumnsExist(db);
+    }
+    if (oldVersion < 15) {
+      await _ensureAppPrefsTableExists(db);
+    }
+  }
+
+  // ========== APP PREFS (Tutorial flags, v.v.) ==========
+
+  /// Lấy giá trị preference theo key. Trả về null nếu không tồn tại.
+  Future<String?> getAppPref(String key) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'app_prefs',
+        where: 'key = ?',
+        whereArgs: [key],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      return rows.first['value'] as String?;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('LocalDbService getAppPref error: $e');
+      }
+      return null;
+    }
+  }
+
+  /// Lưu preference (key-value). Dùng cho has_seen_welcome_popup, has_completed_overview_tour.
+  Future<void> setAppPref(String key, String value) async {
+    try {
+      final db = await database;
+      await db.insert(
+        'app_prefs',
+        {'key': key, 'value': value},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('LocalDbService setAppPref error: $e');
+      }
+      rethrow;
+    }
+  }
+
+  // ========== CÀI ĐẶT MÁY IN (SharedPreferences) ==========
+  static const String _keyPrinterPaperSizeMm = 'printer_paper_size_mm';
+  static const String _keyAutoPrintAfterPayment = 'auto_print_after_payment';
+  static const String _keyPrinterName = 'printer_name';
+
+  /// Khổ giấy mặc định (58 hoặc 80 mm). Mặc định 80.
+  Future<int> getPrinterPaperSizeMm() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getInt(_keyPrinterPaperSizeMm);
+      if (v == 58 || v == 80) return v!;
+      return 80;
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getPrinterPaperSizeMm: $e');
+      return 80;
+    }
+  }
+
+  Future<void> setPrinterPaperSizeMm(int value) async {
+    if (value != 58 && value != 80) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_keyPrinterPaperSizeMm, value);
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService setPrinterPaperSizeMm: $e');
+      rethrow;
+    }
+  }
+
+  /// Tự động in sau khi thanh toán. Mặc định false.
+  Future<bool> getAutoPrintAfterPayment() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_keyAutoPrintAfterPayment) ?? false;
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getAutoPrintAfterPayment: $e');
+      return false;
+    }
+  }
+
+  Future<void> setAutoPrintAfterPayment(bool value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_keyAutoPrintAfterPayment, value);
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService setAutoPrintAfterPayment: $e');
+      rethrow;
+    }
+  }
+
+  /// Tên máy in (Desktop, Silent Print). Null nếu chưa đặt.
+  Future<String?> getPrinterName() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_keyPrinterName);
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getPrinterName: $e');
+      return null;
+    }
+  }
+
+  Future<void> setPrinterName(String? value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (value == null || value.trim().isEmpty) {
+        await prefs.remove(_keyPrinterName);
+      } else {
+        await prefs.setString(_keyPrinterName, value.trim());
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService setPrinterName: $e');
+      rethrow;
+    }
   }
 
   /// Lấy tất cả sản phẩm
@@ -927,11 +1212,15 @@ class LocalDbService {
       }).toList();
     }
 
+    _fillProductCaches(products);
     return products;
   }
 
-  /// Lấy sản phẩm theo ID
+  /// Lấy sản phẩm theo ID — ưu tiên cache (<100ms).
   Future<ProductModel?> getProductById(String id) async {
+    final cached = _productByIdCache?[id];
+    if (cached != null) return cached;
+
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'products',
@@ -941,7 +1230,33 @@ class LocalDbService {
     );
 
     if (maps.isEmpty) return null;
-    return ProductModel.fromMap(maps.first);
+    final product = ProductModel.fromMap(maps.first);
+    _productByIdCache ??= {};
+    _productByIdCache![id] = product;
+    return product;
+  }
+
+  /// Lấy sản phẩm theo mã vạch — ưu tiên cache O(1) (<100ms).
+  Future<ProductModel?> getProductByBarcode(String barcode) async {
+    final key = barcode.trim().toLowerCase();
+    if (key.isEmpty) return null;
+    final cached = _productByBarcodeCache?[key];
+    if (cached != null) return cached;
+
+    if (_productByIdCache != null) {
+      for (final p in _productByIdCache!.values) {
+        final b = p.barcode?.trim().toLowerCase();
+        if (b == key) {
+          _productByBarcodeCache ??= {};
+          _productByBarcodeCache![key] = p;
+          return p;
+        }
+      }
+      return null;
+    }
+
+    await getProducts(includeInactive: false);
+    return _productByBarcodeCache?[key];
   }
 
   /// Tìm kiếm sản phẩm theo tên hoặc barcode
@@ -1004,6 +1319,7 @@ class LocalDbService {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
 
+    _invalidateProductCache();
     return product.id;
   }
 
@@ -1014,18 +1330,20 @@ class LocalDbService {
       updatedAt: DateTime.now(),
     );
 
-    return await db.update(
+    final n = await db.update(
       'products',
       productWithTimestamp.toMap(),
       where: 'id = ?',
       whereArgs: [product.id],
     );
+    _invalidateProductCache();
+    return n;
   }
 
   /// Xóa sản phẩm (soft delete - đánh dấu isActive = false)
   Future<int> deleteProduct(String id) async {
     final db = await database;
-    return await db.update(
+    final n = await db.update(
       'products',
       {
         'isActive': 0,
@@ -1034,16 +1352,20 @@ class LocalDbService {
       where: 'id = ?',
       whereArgs: [id],
     );
+    _invalidateProductCache();
+    return n;
   }
 
   /// Xóa vĩnh viễn sản phẩm
   Future<int> deleteProductPermanently(String id) async {
     final db = await database;
-    return await db.delete(
+    final n = await db.delete(
       'products',
       where: 'id = ?',
       whereArgs: [id],
     );
+    _invalidateProductCache();
+    return n;
   }
 
   /// Lấy số lượng sản phẩm
@@ -1274,30 +1596,46 @@ class LocalDbService {
       maps = await db.query('sales', orderBy: 'timestamp DESC');
     }
 
-    return maps.map((map) {
-      // Parse items từ JSON string
-      final itemsJson = map['items'] as String? ?? '[]';
-      final items = SaleItem.fromJsonList(itemsJson);
+    return maps.map((map) => _saleFromDbMap(map)).toList();
+  }
 
-      return SaleModel(
-        id: map['id'] as String,
-        timestamp: DateTime.parse(map['timestamp'] as String),
-        totalAmount: (map['totalAmount'] as num).toDouble(),
-        items: items,
-        paymentMethod: map['paymentMethod'] as String,
-        paymentStatus: map['paymentStatus'] as String? ?? 'COMPLETED',
-        userId: map['userId'] as String,
-        branchId: map['branchId'] as String? ?? '', // Bắt buộc, mặc định rỗng nếu không có
-        customerName: map['customerName'] as String?,
-        customerTaxCode: map['customerTaxCode'] as String?,
-        customerAddress: map['customerAddress'] as String?,
-        customerId: map['customerId'] as String?,
-        notes: map['notes'] as String?,
-        sellerId: map['sellerId'] as String?,
-        sellerName: map['sellerName'] as String?,
-        isStockUpdated: (map['isStockUpdated'] as int? ?? 0) == 1, // SQLite lưu boolean dạng int
-      );
-    }).toList();
+  /// Parse một dòng sales từ DB thành SaleModel (dùng chung cho getSales / getSaleById nếu có)
+  SaleModel _saleFromDbMap(Map<String, dynamic> map) {
+    final itemsJson = map['items'] as String? ?? '[]';
+    final items = SaleItem.fromJsonList(itemsJson);
+    return SaleModel(
+      id: map['id'] as String,
+      timestamp: DateTime.parse(map['timestamp'] as String),
+      totalAmount: (map['totalAmount'] as num).toDouble(),
+      items: items,
+      paymentMethod: map['paymentMethod'] as String,
+      paymentStatus: map['paymentStatus'] as String? ?? 'COMPLETED',
+      userId: map['userId'] as String,
+      branchId: map['branchId'] as String? ?? '',
+      customerName: map['customerName'] as String?,
+      customerTaxCode: map['customerTaxCode'] as String?,
+      customerAddress: map['customerAddress'] as String?,
+      customerId: map['customerId'] as String?,
+      notes: map['notes'] as String?,
+      sellerId: map['sellerId'] as String?,
+      sellerName: map['sellerName'] as String?,
+      isStockUpdated: (map['isStockUpdated'] as int? ?? 0) == 1,
+      totalBeforeDiscount: map['totalBeforeDiscount'] != null ? (map['totalBeforeDiscount'] as num).toDouble() : null,
+      discountAmount: map['discountAmount'] != null ? (map['discountAmount'] as num).toDouble() : null,
+      subTotal: map['subTotal'] != null ? (map['subTotal'] as num).toDouble() : null,
+      orderDiscountValue: map['orderDiscountValue'] != null ? (map['orderDiscountValue'] as num).toDouble() : null,
+      orderDiscountType: map['orderDiscountType'] as String?,
+      totalDiscountAmount: map['totalDiscountAmount'] != null ? (map['totalDiscountAmount'] as num).toDouble() : null,
+      discountApprovedBy: map['discountApprovedBy'] as String?,
+      vatRate: map['vatRate'] != null ? (map['vatRate'] as num).toDouble() : null,
+      taxAmount: map['taxAmount'] != null ? (map['taxAmount'] as num).toDouble() : null,
+      invoiceNo: map['invoiceNo'] as String?,
+      templateCode: map['templateCode'] as String?,
+      invoiceSerial: map['invoiceSerial'] as String?,
+      einvoiceUrl: map['einvoiceUrl'] as String?,
+      totalPayment: map['totalPayment'] != null ? (map['totalPayment'] as num).toDouble() : null,
+      statusValue: map['statusValue'] as String?,
+    );
   }
 
   /// Thêm đơn hàng mới
@@ -1325,11 +1663,22 @@ class LocalDbService {
         'notes': sale.notes,
         'sellerId': sale.sellerId,
         'sellerName': sale.sellerName,
-        'isStockUpdated': sale.isStockUpdated ? 1 : 0, // SQLite lưu boolean dạng int
+        'isStockUpdated': sale.isStockUpdated ? 1 : 0,
+        'totalBeforeDiscount': sale.totalBeforeDiscount,
+        'discountAmount': sale.discountAmount,
+        'subTotal': sale.subTotal,
+        'orderDiscountValue': sale.orderDiscountValue,
+        'orderDiscountType': sale.orderDiscountType,
+        'totalDiscountAmount': sale.totalDiscountAmount,
+        'discountApprovedBy': sale.discountApprovedBy,
+        'vatRate': sale.vatRate,
+        'taxAmount': sale.taxAmount,
         'invoiceNo': sale.invoiceNo,
         'templateCode': sale.templateCode,
         'invoiceSerial': sale.invoiceSerial,
         'einvoiceUrl': sale.einvoiceUrl,
+        'totalPayment': sale.totalPayment,
+        'statusValue': sale.statusValue,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -1631,40 +1980,69 @@ class LocalDbService {
 
   // ==================== CUSTOMERS ====================
 
-  /// Đảm bảo bảng customers tồn tại
+  /// Đảm bảo bảng customers tồn tại và có đủ cột theo [CustomerModel] (đồng bộ với giao diện mới).
   Future<void> _ensureCustomersTableExists(Database db) async {
     try {
       await db.rawQuery('SELECT 1 FROM customers LIMIT 1');
     } catch (e) {
-      // Table chưa tồn tại, tạo mới
+      // Table chưa tồn tại, tạo mới với đủ cột
       await db.execute('''
         CREATE TABLE IF NOT EXISTS customers (
           id TEXT PRIMARY KEY,
+          kiotId INTEGER,
+          code TEXT,
           name TEXT NOT NULL,
           phone TEXT NOT NULL,
           address TEXT,
           groupId TEXT,
+          groupIds TEXT,
+          groups TEXT,
           totalDebt REAL NOT NULL DEFAULT 0,
+          totalRevenue REAL NOT NULL DEFAULT 0,
+          totalInvoiced REAL,
+          taxCode TEXT,
+          gender INTEGER,
+          birthDate TEXT,
+          email TEXT,
+          locationName TEXT,
+          wardName TEXT,
+          organization TEXT,
+          comments TEXT,
           createdAt TEXT,
           updatedAt TEXT
         )
       ''');
 
-      // Tạo index
       try {
-        await db.execute('''
-          CREATE INDEX IF NOT EXISTS idx_customer_phone ON customers(phone)
-        ''');
-      } catch (e) {
-        // Index có thể đã tồn tại
-      }
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_customer_phone ON customers(phone)');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_customer_group ON customers(groupId)');
+      } catch (_) {}
+      return;
+    }
+    // Bảng đã tồn tại: migration thêm cột nếu thiếu (đồng bộ với CustomerModel / giao diện)
+    await _migrateCustomersTableAddColumns(db);
+  }
 
+  /// Thêm các cột thiếu vào bảng customers (migration cho DB cũ).
+  Future<void> _migrateCustomersTableAddColumns(Database db) async {
+    const columns = [
+      'kiotId INTEGER', 'code TEXT', 'totalRevenue REAL', 'totalInvoiced REAL', 'taxCode TEXT',
+      'gender INTEGER', 'birthDate TEXT', 'email TEXT', 'locationName TEXT', 'wardName TEXT',
+      'organization TEXT', 'comments TEXT', 'groupIds TEXT', 'groups TEXT',
+    ];
+    for (final colDef in columns) {
+      final name = colDef.split(' ').first;
       try {
-        await db.execute('''
-          CREATE INDEX IF NOT EXISTS idx_customer_group ON customers(groupId)
-        ''');
+        await db.execute('ALTER TABLE customers ADD COLUMN $colDef');
+        if (kDebugMode) debugPrint('✅ customers: added column $name');
       } catch (e) {
-        // Index có thể đã tồn tại
+        if (e.toString().contains('duplicate column')) {
+          // Đã có cột, bỏ qua
+        } else {
+          rethrow;
+        }
       }
     }
   }
@@ -1673,12 +2051,7 @@ class LocalDbService {
   Future<List<CustomerModel>> getCustomers() async {
     try {
       final db = await database;
-      
-      try {
-        await db.rawQuery('SELECT 1 FROM customers LIMIT 1');
-      } catch (e) {
-        await _ensureCustomersTableExists(db);
-      }
+      await _ensureCustomersTableExists(db);
 
       final maps = await db.query('customers', orderBy: 'name ASC');
       return maps.map((map) => CustomerModel.fromMap(map)).toList();
@@ -1694,12 +2067,7 @@ class LocalDbService {
   Future<CustomerModel?> getCustomerById(String id) async {
     try {
       final db = await database;
-      
-      try {
-        await db.rawQuery('SELECT 1 FROM customers LIMIT 1');
-      } catch (e) {
-        await _ensureCustomersTableExists(db);
-      }
+      await _ensureCustomersTableExists(db);
 
       final maps = await db.query(
         'customers',
@@ -1722,12 +2090,7 @@ class LocalDbService {
   Future<List<CustomerModel>> searchCustomers(String query) async {
     try {
       final db = await database;
-      
-      try {
-        await db.rawQuery('SELECT 1 FROM customers LIMIT 1');
-      } catch (e) {
-        await _ensureCustomersTableExists(db);
-      }
+      await _ensureCustomersTableExists(db);
 
       final searchPattern = '%$query%';
       final maps = await db.query(
@@ -1750,12 +2113,7 @@ class LocalDbService {
   Future<String> addCustomer(CustomerModel customer) async {
     try {
       final db = await database;
-      
-      try {
-        await db.rawQuery('SELECT 1 FROM customers LIMIT 1');
-      } catch (e) {
-        await _ensureCustomersTableExists(db);
-      }
+      await _ensureCustomersTableExists(db);
 
       await db.insert(
         'customers',
@@ -1772,16 +2130,34 @@ class LocalDbService {
     }
   }
 
+  /// Thêm hàng loạt khách hàng (batch insert, tối ưu cho import).
+  Future<void> addCustomersBatch(List<CustomerModel> customers) async {
+    if (customers.isEmpty) return;
+    try {
+      final db = await database;
+      await _ensureCustomersTableExists(db);
+      final batch = db.batch();
+      for (final c in customers) {
+        batch.insert(
+          'customers',
+          c.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error adding customers batch to SQLite: $e');
+      }
+      rethrow;
+    }
+  }
+
   /// Cập nhật khách hàng
   Future<int> updateCustomer(CustomerModel customer) async {
     try {
       final db = await database;
-      
-      try {
-        await db.rawQuery('SELECT 1 FROM customers LIMIT 1');
-      } catch (e) {
-        await _ensureCustomersTableExists(db);
-      }
+      await _ensureCustomersTableExists(db);
 
       return await db.update(
         'customers',

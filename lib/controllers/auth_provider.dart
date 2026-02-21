@@ -47,12 +47,34 @@ class AuthProvider with ChangeNotifier {
     return _shop!.packageType == 'BASIC';
   }
 
-  /// Kiểm tra quyền dựa trên UserModel (admin / staff)
-  bool get isAdminUser => _userProfile?.isAdmin ?? false;
+  /// Phân quyền: owner (chủ shop), manager (quản lý), staff (nhân viên).
+  bool get isOwner => _user != null && _shop != null && _user!.uid == _shop!.id;
+  bool get isManager => _userProfile?.isManager ?? false;
   bool get isStaffUser => _userProfile?.isStaff ?? false;
+
+  /// Chi nhánh làm việc của nhân viên: ưu tiên workingBranchId từ profile, fallback selectedBranchId.
+  String? get effectiveBranchId =>
+      _userProfile?.workingBranchId ?? _selectedBranchId;
+
+  /// Tương thích ngược: admin = manager
+  bool get isAdminUser => _userProfile?.isAdmin ?? false;
 
   /// Cho phép cập nhật nhanh tồn kho tại danh sách sản phẩm (từ shop).
   bool get allowQuickStockUpdate => _shop?.allowQuickStockUpdate ?? true;
+
+  /// Chỉ trừ kho khi phát hành hóa đơn điện tử (từ shop).
+  bool get deductStockOnEinvoiceOnly => _shop?.deductStockOnEinvoiceOnly ?? false;
+
+  /// Quyền hiệu lực của user hiện tại (từ nhóm + customPermissions). Owner = null nghĩa là full quyền.
+  Set<String>? _effectivePermissions;
+
+  /// Kiểm tra user hiện tại có quyền [permission] hay không.
+  /// Owner luôn có đủ quyền. Nhân viên có groupId: dùng quyền từ nhóm + customPermissions.
+  bool hasPermission(String permission) {
+    if (isOwner) return true;
+    if (_effectivePermissions != null) return _effectivePermissions!.contains(permission);
+    return false;
+  }
 
   AuthProvider() {
     _initializeFirebase();
@@ -262,6 +284,48 @@ class AuthProvider with ChangeNotifier {
 
         if (shopDoc.exists && shopDoc.data() != null) {
           _shop = ShopModel.fromFirestore(shopDoc.data()!, shopDoc.id);
+          // Nhân viên: gắn với branchId — nếu chưa chọn chi nhánh thì dùng workingBranchId
+          if ((_selectedBranchId == null || _selectedBranchId!.isEmpty) &&
+              _userProfile!.workingBranchId != null &&
+              _userProfile!.workingBranchId!.isNotEmpty) {
+            _selectedBranchId = _userProfile!.workingBranchId;
+            await _saveSelectedBranchId(_selectedBranchId);
+          }
+          // Load quyền từ nhóm nhân viên (nếu có groupId)
+          final groupId = _userProfile!.groupId;
+          if (groupId != null && groupId.isNotEmpty) {
+            try {
+              final groupDoc = await firestore
+                  .collection('shops')
+                  .doc(shopId)
+                  .collection('employee_groups')
+                  .doc(groupId)
+                  .get();
+              if (groupDoc.exists && groupDoc.data() != null) {
+                final perms = groupDoc.data()!['permissions'];
+                final list = perms is List
+                    ? perms.map((e) => e.toString()).toList()
+                    : <String>[];
+                _effectivePermissions = Set<String>.from(list);
+                if (_userProfile!.customPermissions != null) {
+                  _effectivePermissions!.addAll(_userProfile!.customPermissions!);
+                }
+              } else {
+                _effectivePermissions = _userProfile!.customPermissions != null
+                    ? Set<String>.from(_userProfile!.customPermissions!)
+                    : <String>{};
+              }
+            } catch (e) {
+              if (kDebugMode) debugPrint('AuthProvider load group permissions: $e');
+              _effectivePermissions = _userProfile!.customPermissions != null
+                  ? Set<String>.from(_userProfile!.customPermissions!)
+                  : <String>{};
+            }
+          } else {
+            _effectivePermissions = _userProfile!.customPermissions != null
+                ? Set<String>.from(_userProfile!.customPermissions!)
+                : <String>{};
+          }
         } else {
           // Không tìm thấy shop tương ứng -> lỗi cấu hình
           _shop = null;
@@ -273,12 +337,13 @@ class AuthProvider with ChangeNotifier {
           return;
         }
       } else {
-        // Không có tài liệu trong 'users' => đây là chủ shop (admin)
+        // Không có tài liệu trong 'users' => đây là chủ shop (owner) — full quyền
+        _effectivePermissions = null;
         _userProfile = UserModel(
           uid: user.uid,
           email: user.email ?? '',
           shopId: user.uid,
-          role: UserRole.admin,
+          role: UserRole.owner,
           isApproved: true,
           createdAt: DateTime.now(),
         );
@@ -495,7 +560,7 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Đăng ký với email và password
-  /// Tự động tạo ShopModel mặc định với gói PRO, dùng thử 14 ngày cho Chủ shop
+  /// Tự động tạo ShopModel mặc định với gói BASIC cho Chủ shop
   Future<bool> signUpOwnerWithEmailAndPassword(
     String email,
     String password,
@@ -521,15 +586,13 @@ class AuthProvider with ChangeNotifier {
       if (credential.user != null) {
         final user = credential.user!;
         
-        // Tạo ShopModel mặc định với gói PRO, dùng thử 14 ngày
-        final licenseEndDate = DateTime.now().add(const Duration(days: 14));
-        
+        // Tạo ShopModel mặc định với gói BASIC
         final defaultShop = ShopModel(
           id: user.uid,
           name: '', // Tên shop trống, user sẽ cập nhật sau
           email: user.email,
-          packageType: 'PRO',
-          licenseEndDate: licenseEndDate,
+          packageType: 'BASIC',
+          licenseEndDate: null,
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
           isActive: true,
@@ -543,8 +606,7 @@ class AuthProvider with ChangeNotifier {
           );
 
           if (kDebugMode) {
-            debugPrint('✅ Shop created successfully in Firestore for user: ${user.uid}');
-            debugPrint('License expires on: ${licenseEndDate.toIso8601String()}');
+            debugPrint('✅ Shop created successfully in Firestore for user: ${user.uid} (package: BASIC)');
           }
 
           // Khởi tạo dữ liệu mẫu (chạy nền, không chặn luồng đăng ký)
@@ -558,7 +620,7 @@ class AuthProvider with ChangeNotifier {
 
         // Cập nhật state
         _shop = defaultShop;
-        _isOfflineMode = false; // PRO package nên không offline
+        _isOfflineMode = true; // BASIC package: chế độ offline
 
         // checkAuthStatus sẽ được gọi tự động qua authStateChanges listener
         _isLoading = false;
@@ -743,6 +805,7 @@ class AuthProvider with ChangeNotifier {
       await FirebaseAuth.instance.signOut();
       _user = null;
       _shop = null;
+      _effectivePermissions = null;
       _isOfflineMode = false;
       _errorMessage = null;
       // KHÔNG xóa email đã ghi nhớ khi đăng xuất

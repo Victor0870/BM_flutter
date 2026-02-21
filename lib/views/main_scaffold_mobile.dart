@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/branch_selector_widget.dart';
+import '../widgets/ad_banner_widget.dart';
 import '../controllers/auth_provider.dart';
 import '../controllers/notification_provider.dart';
+import '../controllers/tutorial_provider.dart';
 import '../core/routes.dart';
 import 'home_screen.dart';
 import 'notifications/notification_screen.dart';
 import 'sales/sales_screen.dart';
-import 'settings/shop_settings_screen.dart';
+import 'more_screen.dart';
+import 'reports/reports_hub_screen.dart';
 
 const String _kMainTabsRoute = '/main-tabs';
 
@@ -32,45 +36,6 @@ class _NestedNavObserver extends NavigatorObserver {
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didRemove(route, previousRoute);
     onStackChanged();
-  }
-}
-
-class _PlaceholderScreen extends StatelessWidget {
-  final String title;
-  final String message;
-
-  const _PlaceholderScreen({
-    required this.title,
-    required this.message,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.construction,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -100,8 +65,12 @@ class _MainScaffoldMobileState extends State<MainScaffoldMobile> {
     final state = _nestedNavKey.currentState;
     final canPop = state != null && state.canPop();
     if (_hasPushedRoute != canPop) {
-      setState(() {
-        _hasPushedRoute = canPop;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _hasPushedRoute = canPop;
+          });
+        }
       });
     }
   }
@@ -109,25 +78,12 @@ class _MainScaffoldMobileState extends State<MainScaffoldMobile> {
   final List<Widget> _screens = [
     const HomeScreen(forceMobile: true),
     const SalesScreen(forceMobile: true),
-    const _PlaceholderScreen(
-      title: 'Báo cáo',
-      message: 'Tính năng đang phát triển',
-    ),
+    const ReportsHubScreen(forceMobile: true),
     const NotificationScreen(forceMobile: true),
-    const ShopSettingsScreen(forceMobile: true),
+    const MoreScreen(forceMobile: true),
   ];
 
   void _onTabTapped(int index) {
-    if (index == 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tính năng đang phát triển'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      _switchToTab(index);
-      return;
-    }
     _switchToTab(index);
   }
 
@@ -160,6 +116,8 @@ class _MainScaffoldMobileState extends State<MainScaffoldMobile> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
+    final tutorialProvider = Provider.of<TutorialProvider>(context, listen: false);
+    tutorialProvider.navigateToShopSettingsCallback = () => _switchToTab(4);
 
     bool showAppBar = _currentIndex != 0 && _currentIndex != 1;
     if (_hasPushedRoute) {
@@ -169,7 +127,7 @@ class _MainScaffoldMobileState extends State<MainScaffoldMobile> {
     return Scaffold(
       appBar: showAppBar
           ? AppBar(
-              title: const Text('BizMate POS'),
+              title: Text(AppLocalizations.of(context)!.appTitle),
               elevation: 0,
               actions: [
                 Builder(
@@ -202,7 +160,15 @@ class _MainScaffoldMobileState extends State<MainScaffoldMobile> {
           observers: [_nestedNavObserver],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
+      // Ad banner ngay sát bottom bar, không thêm SafeArea để tránh khoảng trống
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 50,
+            child: Center(child: AdBannerWidget()),
+          ),
+          BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _currentIndex.clamp(0, 4),
         onTap: _onTabTapped,
@@ -239,9 +205,16 @@ class _MainScaffoldMobileState extends State<MainScaffoldMobile> {
             ),
             label: 'Thông báo',
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Cài đặt',
+          BottomNavigationBarItem(
+            icon: tutorialProvider.shouldRunPhase1Tour
+                ? KeyedSubtree(
+                    key: TutorialKeys.instance.keyQuickActionSettings,
+                    child: const Icon(Icons.more_horiz),
+                  )
+                : const Icon(Icons.more_horiz),
+            label: AppLocalizations.of(context)!.more,
+          ),
+        ],
           ),
         ],
       ),

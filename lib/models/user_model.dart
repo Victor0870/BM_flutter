@@ -1,18 +1,25 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Enum cho vai trò người dùng
+/// Enum cho vai trò người dùng (owner = chủ shop, manager = quản lý, staff = nhân viên)
 enum UserRole {
-  admin('admin'),
+  owner('owner'),
+  manager('manager'),
   staff('staff');
 
   final String value;
   const UserRole(this.value);
 
   static UserRole fromString(String value) {
-    return UserRole.values.firstWhere(
-      (e) => e.value == value,
-      orElse: () => UserRole.staff,
-    );
+    switch (value.toLowerCase()) {
+      case 'owner':
+        return UserRole.owner;
+      case 'manager':
+      case 'admin': // Tương thích ngược: admin -> manager
+        return UserRole.manager;
+      case 'staff':
+      default:
+        return UserRole.staff;
+    }
   }
 }
 
@@ -29,6 +36,10 @@ class UserModel {
   final String? phone;
   final String? workingBranchId; // Chi nhánh làm việc chính của nhân viên
   final List<String> allowedBranchIds; // Danh sách ID các chi nhánh mà nhân viên có quyền truy cập
+  /// ID nhóm nhân viên (để thừa hưởng quyền từ nhóm).
+  final String? groupId;
+  /// Quyền tùy chỉnh ghi đè (bổ sung hoặc tắt quyền so với nhóm).
+  final List<String>? customPermissions;
 
   UserModel({
     required this.uid,
@@ -40,8 +51,10 @@ class UserModel {
     this.updatedAt,
     this.displayName,
     this.phone,
-    this.workingBranchId, // Chi nhánh làm việc chính
-    this.allowedBranchIds = const [], // Mặc định rỗng
+    this.workingBranchId,
+    this.allowedBranchIds = const [],
+    this.groupId,
+    this.customPermissions,
   });
 
   /// Tạo UserModel từ Firestore document
@@ -64,6 +77,10 @@ class UserModel {
       allowedBranchIds: data['allowedBranchIds'] != null
           ? List<String>.from(data['allowedBranchIds'] as List)
           : [],
+      groupId: data['groupId'],
+      customPermissions: data['customPermissions'] != null
+          ? List<String>.from(data['customPermissions'] as List)
+          : null,
     );
   }
 
@@ -87,6 +104,10 @@ class UserModel {
       allowedBranchIds: json['allowedBranchIds'] != null
           ? List<String>.from(json['allowedBranchIds'] as List)
           : [],
+      groupId: json['groupId'],
+      customPermissions: json['customPermissions'] != null
+          ? List<String>.from(json['customPermissions'] as List)
+          : null,
     );
   }
 
@@ -104,10 +125,13 @@ class UserModel {
       'phone': phone,
       'workingBranchId': workingBranchId,
       'allowedBranchIds': allowedBranchIds,
+      'groupId': groupId,
+      'customPermissions': customPermissions,
     };
   }
 
   /// Chuyển đổi sang Firestore document
+  /// Nhân viên trong users chỉ có role 'manager' hoặc 'staff' (owner không có doc trong users).
   Map<String, dynamic> toFirestore() {
     return {
       'email': email,
@@ -120,6 +144,8 @@ class UserModel {
       'phone': phone,
       'workingBranchId': workingBranchId,
       'allowedBranchIds': allowedBranchIds,
+      'groupId': groupId,
+      'customPermissions': customPermissions,
     };
   }
 
@@ -136,6 +162,8 @@ class UserModel {
     String? phone,
     String? workingBranchId,
     List<String>? allowedBranchIds,
+    String? groupId,
+    List<String>? customPermissions,
   }) {
     return UserModel(
       uid: uid ?? this.uid,
@@ -149,12 +177,20 @@ class UserModel {
       phone: phone ?? this.phone,
       workingBranchId: workingBranchId ?? this.workingBranchId,
       allowedBranchIds: allowedBranchIds ?? this.allowedBranchIds,
+      groupId: groupId ?? this.groupId,
+      customPermissions: customPermissions ?? this.customPermissions,
     );
   }
 
-  /// Kiểm tra xem user có phải admin không
-  bool get isAdmin => role == UserRole.admin;
+  /// Kiểm tra xem user có phải chủ shop (owner) không
+  bool get isOwner => role == UserRole.owner;
 
-  /// Kiểm tra xem user có phải staff không
+  /// Kiểm tra xem user có phải quản lý (manager) không
+  bool get isManager => role == UserRole.manager;
+
+  /// Kiểm tra xem user có phải nhân viên (staff) không
   bool get isStaff => role == UserRole.staff;
+
+  /// Tương thích ngược: admin = manager
+  bool get isAdmin => role == UserRole.manager;
 }

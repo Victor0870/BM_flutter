@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/product_model.dart';
 import '../models/sale_model.dart';
 import '../models/customer_model.dart';
+import '../models/profit_report_model.dart';
 import '../services/sales_service.dart';
 import '../services/product_service.dart';
 import '../services/customer_service.dart';
@@ -53,6 +54,13 @@ class SalesProvider with ChangeNotifier {
   Timer? _paymentPollingTimer; // Timer để polling payment status
   // ignore: unused_field
   String? _pendingSaleId; // ID của đơn hàng đang chờ thanh toán (chỉ dùng cho PayOS auto polling)
+  /// Đơn hàng vừa hoàn tất (dùng cho auto-print sau thanh toán). Clear sau khi đã dùng.
+  SaleModel? _lastCompletedSale;
+  SaleModel? get lastCompletedSale => _lastCompletedSale;
+  void clearLastCompletedSale() {
+    _lastCompletedSale = null;
+    notifyListeners();
+  }
 
   // Getters - Trả về giá trị dựa trên activeTabId
   int get activeTabId => _activeTabId;
@@ -282,46 +290,62 @@ class SalesProvider with ChangeNotifier {
     _initializeServices();
   }
 
-  /// Thêm sản phẩm vào giỏ hàng
-  void addToCart(ProductModel product, {double quantity = 1, int? tabId}) {
+  /// Thêm sản phẩm vào giỏ hàng.
+  /// [customer] Nếu có, dùng Bảng giá (groupPrices) theo nhóm khách (VIP/Sỉ) để lấy giá bán.
+  /// [batchName], [expireDate] Lô & Hạn sử dụng (KiotViet 2.12.1) — bắt buộc khi sản phẩm isBatchExpireControl.
+  void addToCart(ProductModel product, {
+    double quantity = 1,
+    int? tabId,
+    CustomerModel? customer,
+    String? batchName,
+    DateTime? expireDate,
+  }) {
     final id = tabId ?? _activeTabId;
-    
-    // Đảm bảo cart của tab tồn tại
     _tabsCart[id] ??= {};
-    
-    // Kiểm tra cấu hình allowNegativeStock
+
     final shop = authProvider.shop;
     final allowNegativeStock = shop?.allowNegativeStock ?? false;
-    
     final cart = _tabsCart[id]!;
-    
-    if (cart.containsKey(product.id)) {
-      // Tăng số lượng nếu sản phẩm đã có trong giỏ
-      final existingItem = cart[product.id]!;
+    final unitPrice = customer != null ? product.getPriceForGroups(customer.groups) : product.price;
+
+    // Key giỏ: sản phẩm theo lô dùng key composite để mỗi lô một dòng
+    final cartKey = (batchName != null && batchName.isNotEmpty)
+        ? '${product.id}_${batchName}_${expireDate?.toIso8601String() ?? ''}'
+        : product.id;
+
+    double maxQty = product.stock;
+    if (batchName != null && product.batchExpires.isNotEmpty) {
+      final branchId = branchProvider?.currentBranchId ?? '';
+      for (final b in product.batchExpires) {
+        if (b.batchName == batchName && b.branchId == branchId) {
+          maxQty = b.onHand;
+          break;
+        }
+      }
+    }
+
+    if (cart.containsKey(cartKey)) {
+      final existingItem = cart[cartKey]!;
       final newQuantity = existingItem.quantity + quantity;
-      
-      // Kiểm tra stock nếu không cho phép bán âm kho
-      if (!allowNegativeStock && newQuantity > product.stock) {
-        _errorMessage = 'Không đủ hàng trong kho. Tồn kho: ${product.stock}';
+      if (!allowNegativeStock && newQuantity > maxQty) {
+        _errorMessage = 'Không đủ hàng trong kho. Tồn lô: $maxQty';
         notifyListeners();
         return;
       }
-
-      cart[product.id] = existingItem.copyWith(quantity: newQuantity);
+      cart[cartKey] = existingItem.copyWith(quantity: newQuantity);
     } else {
-      // Thêm sản phẩm mới vào giỏ
-      // Kiểm tra stock nếu không cho phép bán âm kho
-      if (!allowNegativeStock && quantity > product.stock) {
-        _errorMessage = 'Không đủ hàng trong kho. Tồn kho: ${product.stock}';
+      if (!allowNegativeStock && quantity > maxQty) {
+        _errorMessage = 'Không đủ hàng trong kho. Tồn lô: $maxQty';
         notifyListeners();
         return;
       }
-
-      cart[product.id] = SaleItem(
+      cart[cartKey] = SaleItem(
         productId: product.id,
         productName: product.name,
         quantity: quantity,
-        price: product.price,
+        price: unitPrice,
+        batchName: batchName,
+        expireDate: expireDate,
       );
     }
 
@@ -329,38 +353,34 @@ class SalesProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Cập nhật số lượng sản phẩm trong giỏ
-  void updateCartItemQuantity(String productId, double quantity, {int? tabId}) {
+  /// Cập nhật số lượng sản phẩm trong giỏ. [cartKey] là key trong map giỏ (productId hoặc productId_batchName_expireDate).
+  void updateCartItemQuantity(String cartKey, double quantity, {int? tabId}) {
     final id = tabId ?? _activeTabId;
     final cart = _tabsCart[id];
-    if (cart == null || !cart.containsKey(productId)) return;
+    if (cart == null || !cart.containsKey(cartKey)) return;
 
     if (quantity <= 0) {
-      // Xóa khỏi giỏ nếu số lượng <= 0
-      removeFromCart(productId, tabId: id);
+      removeFromCart(cartKey, tabId: id);
       return;
     }
 
-    // Kiểm tra stock nếu không cho phép bán âm kho
-    // Lưu ý: Cần lấy product từ ProductProvider để kiểm tra stock
-    // Tạm thời chỉ cập nhật, sẽ kiểm tra kỹ hơn khi checkout
-    final item = cart[productId]!;
-    cart[productId] = item.copyWith(quantity: quantity);
+    final item = cart[cartKey]!;
+    cart[cartKey] = item.copyWith(quantity: quantity);
     notifyListeners();
   }
 
-  /// Xóa sản phẩm khỏi giỏ hàng
-  void removeFromCart(String productId, {int? tabId}) {
+  /// Xóa sản phẩm khỏi giỏ hàng. [cartKey] là key trong map giỏ (productId hoặc productId_batchName_expireDate).
+  void removeFromCart(String cartKey, {int? tabId}) {
     final id = tabId ?? _activeTabId;
-    _tabsCart[id]?.remove(productId);
+    _tabsCart[id]?.remove(cartKey);
     notifyListeners();
   }
 
   /// Cập nhật giá bán của sản phẩm trong giỏ
-  void updateCartItemPrice(String productId, double newPrice, {int? tabId}) {
+  void updateCartItemPrice(String cartKey, double newPrice, {int? tabId}) {
     final id = tabId ?? _activeTabId;
     final cart = _tabsCart[id];
-    if (cart == null || !cart.containsKey(productId)) return;
+    if (cart == null || !cart.containsKey(cartKey)) return;
 
     if (newPrice < 0) {
       _errorMessage = 'Giá bán không được âm';
@@ -368,18 +388,16 @@ class SalesProvider with ChangeNotifier {
       return;
     }
 
-    cart[productId] = cart[productId]!.copyWith(price: newPrice);
+    cart[cartKey] = cart[cartKey]!.copyWith(price: newPrice);
     _errorMessage = null;
     notifyListeners();
   }
 
   /// Cập nhật chiết khấu cho sản phẩm trong giỏ
-  /// [discount] Giá trị chiết khấu
-  /// [isPercentage] true nếu là phần trăm, false nếu là số tiền
-  void updateCartItemDiscount(String productId, double? discount, bool? isPercentage, {int? tabId}) {
+  void updateCartItemDiscount(String cartKey, double? discount, bool? isPercentage, {int? tabId}) {
     final id = tabId ?? _activeTabId;
     final cart = _tabsCart[id];
-    if (cart == null || !cart.containsKey(productId)) return;
+    if (cart == null || !cart.containsKey(cartKey)) return;
 
     if (discount != null && discount < 0) {
       _errorMessage = 'Chiết khấu không được âm';
@@ -387,7 +405,7 @@ class SalesProvider with ChangeNotifier {
       return;
     }
 
-    cart[productId] = cart[productId]!.copyWith(
+    cart[cartKey] = cart[cartKey]!.copyWith(
       discount: discount,
       isDiscountPercentage: isPercentage,
     );
@@ -724,9 +742,20 @@ class SalesProvider with ChangeNotifier {
     }
   }
 
-  /// Thanh toán - Lưu đơn hàng và cập nhật stock
-  Future<bool> checkout({int? tabId}) async {
-    if (_salesService == null) {
+  /// Sản phẩm mẫu dùng cho chế độ hướng dẫn (Sandbox) — không lưu DB.
+  static ProductModel getDummyProductForTutorial() {
+    return ProductModel(
+      id: 'tutorial_dummy_product_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Sản phẩm mẫu (Hướng dẫn)',
+      branchPrices: const {'default': 50000.0},
+      importPrice: 30000.0,
+      branchStock: const {'default': 999.0},
+    );
+  }
+
+  /// Thanh toán - Lưu đơn hàng và cập nhật stock. [isTutorialMode] true: không lưu, chỉ clear giỏ và trả về true.
+  Future<bool> checkout({int? tabId, bool isTutorialMode = false}) async {
+    if (_salesService == null && !isTutorialMode) {
       _errorMessage = 'Chưa đăng nhập';
       notifyListeners();
       return false;
@@ -741,6 +770,14 @@ class SalesProvider with ChangeNotifier {
       return false;
     }
 
+    if (isTutorialMode) {
+      clearCart(tabId: id);
+      _isLoading = false;
+      _errorMessage = null;
+      notifyListeners();
+      return true;
+    }
+
     try {
       _isLoading = true;
       _errorMessage = null;
@@ -750,10 +787,10 @@ class SalesProvider with ChangeNotifier {
       final totalAmount = getFinalTotal(id);
       final cartItems = cart.values.toList();
 
-      // Lấy thông tin seller
+      // Lấy thông tin nhân viên thực hiện đơn (staffId = sellerId khi lưu)
       final sellerId = authProvider.user!.uid;
-      final sellerName = authProvider.userProfile?.displayName ?? 
-                        authProvider.user?.email?.split('@').first ?? 
+      final sellerName = authProvider.userProfile?.displayName ??
+                        authProvider.user?.email?.split('@').first ??
                         'Nhân viên';
 
       // Tạo đơn hàng với đầy đủ thông tin
@@ -780,7 +817,7 @@ class SalesProvider with ChangeNotifier {
         customerTaxCode: getCustomerTaxCode(id),
         customerAddress: getCustomerAddress(id),
         notes: getNotes(id),
-        branchId: branchProvider?.currentBranchId ?? authProvider.selectedBranchId ?? '',
+        branchId: branchProvider?.currentBranchId ?? authProvider.effectiveBranchId ?? '',
         sellerId: sellerId, // ID của nhân viên bán hàng
         sellerName: sellerName, // Tên nhân viên bán hàng
         subTotal: subTotal, // Tổng tiền hàng sau khi trừ chiết khấu từng dòng
@@ -793,12 +830,17 @@ class SalesProvider with ChangeNotifier {
         // Tương thích ngược
         totalBeforeDiscount: subTotal,
         discountAmount: totalDiscountAmount > 0 ? totalDiscountAmount : null,
+        totalPayment: totalAmount,
+        statusValue: kOrderStatusDelivered,
       );
 
-      // Lưu đơn hàng (saveSale tự động cập nhật stock khi paymentStatus = COMPLETED; không trừ kho thêm)
+      // Lưu đơn hàng (saveSale tự động cập nhật stock khi paymentStatus = COMPLETED)
+      // Nếu deductStockOnEinvoiceOnly: không trừ kho ở đây, chỉ trừ khi phát hành HĐĐT
+      final deductOnEinvoiceOnly = authProvider.shop?.deductStockOnEinvoiceOnly ?? false;
       await _salesService!.saveSale(
-        sale.copyWith(isStockUpdated: true),
+        sale.copyWith(isStockUpdated: deductOnEinvoiceOnly ? false : true),
         customerService: _customerService,
+        skipStockUpdate: deductOnEinvoiceOnly,
       );
 
       // Tự động lưu khách hàng mới nếu chưa có trong hệ thống
@@ -845,6 +887,7 @@ class SalesProvider with ChangeNotifier {
           final invoiceInfo = await _einvoiceService.createInvoice(
             sale: sale,
             shop: shop,
+            salesService: _salesService, // Cần để cập nhật sale và trừ kho (nếu deductStockOnEinvoiceOnly)
           );
           _lastInvoiceUrl = invoiceInfo['link'];
           if (kDebugMode) {
@@ -859,6 +902,8 @@ class SalesProvider with ChangeNotifier {
           _errorMessage = 'Thanh toán thành công nhưng không thể tạo hóa đơn điện tử: $e';
         }
       }
+
+      _lastCompletedSale = sale;
 
       // Xóa giỏ hàng sau khi thanh toán thành công
       clearCart(tabId: id);
@@ -900,10 +945,10 @@ class SalesProvider with ChangeNotifier {
       _errorMessage = null;
       notifyListeners();
 
-      // Lấy thông tin seller
+      // Lấy thông tin nhân viên thực hiện đơn (staffId = sellerId khi lưu)
       final sellerId = authProvider.user!.uid;
-      final sellerName = authProvider.userProfile?.displayName ?? 
-                        authProvider.user?.email?.split('@').first ?? 
+      final sellerName = authProvider.userProfile?.displayName ??
+                        authProvider.user?.email?.split('@').first ??
                         'Nhân viên';
 
       // Tạo đơn hàng với paymentStatus = PENDING
@@ -934,7 +979,7 @@ class SalesProvider with ChangeNotifier {
         customerTaxCode: getCustomerTaxCode(id),
         customerAddress: getCustomerAddress(id),
         notes: getNotes(id),
-        branchId: branchProvider?.currentBranchId ?? authProvider.selectedBranchId ?? '',
+        branchId: branchProvider?.currentBranchId ?? authProvider.effectiveBranchId ?? '',
         sellerId: sellerId, // ID của nhân viên bán hàng
         sellerName: sellerName, // Tên nhân viên bán hàng
         subTotal: subTotal,
@@ -946,11 +991,14 @@ class SalesProvider with ChangeNotifier {
         discountApprovedBy: discountApprovedBy,
         totalBeforeDiscount: subTotal,
         discountAmount: totalDiscountAmount > 0 ? totalDiscountAmount : null,
+        totalPayment: null,
+        statusValue: kOrderStatusProcessing,
       );
 
       // Lưu đơn hàng với status PENDING (KHÔNG cập nhật stock ngay)
       // Chỉ cập nhật stock khi paymentStatus = COMPLETED
       await _salesService!.saveSale(sale);
+      _lastCompletedSale = sale;
 
       // Tự động lưu khách hàng mới nếu chưa có trong hệ thống
       final selectedCustomer = getSelectedCustomer(id);
@@ -1034,10 +1082,10 @@ class SalesProvider with ChangeNotifier {
       final totalAmount = getFinalTotal(id);
       final cartItems = cart.values.toList();
 
-      // Lấy thông tin seller
+      // Lấy thông tin nhân viên thực hiện đơn (staffId = sellerId khi lưu)
       final sellerId = authProvider.user!.uid;
-      final sellerName = authProvider.userProfile?.displayName ?? 
-                        authProvider.user?.email?.split('@').first ?? 
+      final sellerName = authProvider.userProfile?.displayName ??
+                        authProvider.user?.email?.split('@').first ??
                         'Nhân viên';
 
       // Tạo đơn hàng với paymentStatus = PENDING
@@ -1066,7 +1114,7 @@ class SalesProvider with ChangeNotifier {
         customerTaxCode: getCustomerTaxCode(id),
         customerAddress: getCustomerAddress(id),
         notes: getNotes(id),
-        branchId: branchProvider?.currentBranchId ?? authProvider.selectedBranchId ?? '',
+        branchId: branchProvider?.currentBranchId ?? authProvider.effectiveBranchId ?? '',
         sellerId: sellerId, // ID của nhân viên bán hàng
         sellerName: sellerName, // Tên nhân viên bán hàng
         subTotal: subTotal,
@@ -1078,6 +1126,8 @@ class SalesProvider with ChangeNotifier {
         discountApprovedBy: discountApprovedBy,
         totalBeforeDiscount: subTotal,
         discountAmount: totalDiscountAmount > 0 ? totalDiscountAmount : null,
+        totalPayment: null,
+        statusValue: kOrderStatusProcessing,
       );
 
       // Lưu đơn hàng với status PENDING (KHÔNG cập nhật stock ngay)
@@ -1140,6 +1190,9 @@ class SalesProvider with ChangeNotifier {
         return true;
       }
       
+      // Nếu deductStockOnEinvoiceOnly: không trừ kho ở đây, chỉ trừ khi phát hành HĐĐT
+      final deductOnEinvoiceOnly = authProvider.shop?.deductStockOnEinvoiceOnly ?? false;
+      
       // Cập nhật stock: saveSale với paymentStatus COMPLETED sẽ tự động trừ kho (chỉ một lần)
       final completedSale = SaleModel(
         id: sale.id,
@@ -1157,7 +1210,7 @@ class SalesProvider with ChangeNotifier {
         branchId: sale.branchId,
         sellerId: sale.sellerId,
         sellerName: sale.sellerName,
-        isStockUpdated: true, // Đánh dấu ngay; saveSale sẽ trừ kho một lần
+        isStockUpdated: deductOnEinvoiceOnly ? false : true, // Chỉ đánh dấu true nếu trừ kho ngay
         subTotal: sale.subTotal,
         orderDiscountValue: sale.orderDiscountValue,
         orderDiscountType: sale.orderDiscountType,
@@ -1165,12 +1218,16 @@ class SalesProvider with ChangeNotifier {
         discountApprovedBy: sale.discountApprovedBy,
         totalBeforeDiscount: sale.totalBeforeDiscount,
         discountAmount: sale.discountAmount,
+        totalPayment: sale.totalAmount,
+        statusValue: kOrderStatusDelivered,
       );
 
       await _salesService!.saveSale(
         completedSale,
         customerService: _customerService,
+        skipStockUpdate: deductOnEinvoiceOnly,
       );
+      _lastCompletedSale = completedSale;
 
       // Tự động lưu khách hàng mới nếu chưa có trong hệ thống
       // (Áp dụng cho trường hợp completeTransferPayment)
@@ -1215,8 +1272,9 @@ class SalesProvider with ChangeNotifier {
           shop.serial!.isNotEmpty) {
         try {
           final invoiceInfo = await _einvoiceService.createInvoice(
-            sale: sale,
+            sale: completedSale,
             shop: shop,
+            salesService: _salesService, // Cần để cập nhật sale và trừ kho (nếu deductStockOnEinvoiceOnly)
           );
           _lastInvoiceUrl = invoiceInfo['link'];
         } catch (e) {
@@ -1388,6 +1446,36 @@ class SalesProvider with ChangeNotifier {
       }
       return null;
     }
+  }
+
+  /// Báo cáo lợi nhuận gộp theo ngày hoặc tháng (gọi SalesService).
+  Future<ProfitReport> getProfitReport({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? branchId,
+    bool byMonth = false,
+  }) async {
+    if (_salesService == null) {
+      return ProfitReport(
+        startDate: startDate,
+        endDate: endDate,
+        branchId: branchId,
+        byMonth: byMonth,
+        items: [],
+      );
+    }
+    if (byMonth) {
+      return await _salesService!.getProfitByMonth(
+        startDate: startDate,
+        endDate: endDate,
+        branchId: branchId,
+      );
+    }
+    return await _salesService!.getProfitByDay(
+      startDate: startDate,
+      endDate: endDate,
+      branchId: branchId,
+    );
   }
 
   /// Lưu tất cả giỏ hàng tạm

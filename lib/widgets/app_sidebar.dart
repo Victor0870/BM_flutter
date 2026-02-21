@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../controllers/locale_provider.dart';
 import '../core/routes.dart';
+import '../l10n/app_localizations.dart';
+import '../core/permission_routes.dart';
 import '../controllers/auth_provider.dart';
 import '../widgets/branch_selector_widget.dart';
+import 'pro_required_dialog.dart';
 
 /// Sidebar widget dùng chung cho desktop
 class AppSidebar extends StatefulWidget {
@@ -27,9 +31,6 @@ class _AppSidebarState extends State<AppSidebar> {
   bool _isCustomersExpanded = false;
   bool _isStaffExpanded = false;
   bool _isReportsExpanded = false;
-  
-  // Track menu nào đang được chọn để highlight ngay khi bấm vào
-  String? _selectedMenuGroup;
 
   @override
   void initState() {
@@ -56,8 +57,7 @@ class _AppSidebarState extends State<AppSidebar> {
     _isCustomersExpanded = false;
     _isStaffExpanded = false;
     _isReportsExpanded = false;
-    _selectedMenuGroup = null; // Reset selected menu group
-    
+
     // Nếu đang ở trang home (dashboard), không highlight menu nào
     if (activeRoute == AppRoutes.home) {
       return;
@@ -69,7 +69,6 @@ class _AppSidebarState extends State<AppSidebar> {
         activeRoute == AppRoutes.cancelInvoice ||
         activeRoute == AppRoutes.electronicInvoice) {
       _isOrdersExpanded = true;
-      _selectedMenuGroup = 'orders';
     }
     
     // Tự động mở menu Products nếu đang ở route của submenu Products
@@ -78,7 +77,6 @@ class _AppSidebarState extends State<AppSidebar> {
         activeRoute == AppRoutes.serviceList ||
         activeRoute == AppRoutes.serviceGroup) {
       _isProductsExpanded = true;
-      _selectedMenuGroup = 'products';
     }
     
     // Tự động mở menu Inventory nếu đang ở route của submenu Inventory
@@ -87,21 +85,18 @@ class _AppSidebarState extends State<AppSidebar> {
         activeRoute == AppRoutes.transferStock ||
         activeRoute == AppRoutes.adjustStock) {
       _isInventoryExpanded = true;
-      _selectedMenuGroup = 'inventory';
     }
 
     // Tự động mở menu Khách hàng nếu đang ở route tương ứng
     if (activeRoute == AppRoutes.customerManagement ||
         activeRoute == AppRoutes.customerGroupManagement) {
       _isCustomersExpanded = true;
-      _selectedMenuGroup = 'customers';
     }
 
     // Tự động mở menu Nhân viên nếu đang ở route tương ứng
     if (activeRoute == AppRoutes.employeeManagement ||
         activeRoute == AppRoutes.employeeGroupManagement) {
       _isStaffExpanded = true;
-      _selectedMenuGroup = 'staff';
     }
 
     // Tự động mở menu Báo cáo nếu đang ở route tương ứng
@@ -112,16 +107,15 @@ class _AppSidebarState extends State<AppSidebar> {
         activeRoute == AppRoutes.debtReport ||
         activeRoute == AppRoutes.salesReturnReport) {
       _isReportsExpanded = true;
-      _selectedMenuGroup = 'reports';
     }
 
     // Tự động mở menu Cài đặt nếu đang ở route của submenu Settings
     if (activeRoute == AppRoutes.shopSettings ||
         activeRoute == AppRoutes.branchManagement ||
+        activeRoute == AppRoutes.electronicInvoice ||
         activeRoute == AppRoutes.advancedSettings ||
         activeRoute == AppRoutes.appAccountSettings) {
       _isSettingsExpanded = true;
-      _selectedMenuGroup = 'settings';
     }
   }
 
@@ -136,6 +130,14 @@ class _AppSidebarState extends State<AppSidebar> {
   }
 
   void _handleMenuTap(String route, {String? routeName}) {
+    if (route == AppRoutes.employeeManagement ||
+        route == AppRoutes.employeeGroupManagement) {
+      final auth = context.read<AuthProvider>();
+      if (!auth.isPro) {
+        showProRequiredDialog(context, featureName: 'Quản lý nhân viên');
+        return;
+      }
+    }
     if (widget.onMenuTap != null) {
       widget.onMenuTap!(route, routeName: routeName);
     } else {
@@ -146,13 +148,18 @@ class _AppSidebarState extends State<AppSidebar> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Material(
-      color: Colors.white,
+      color: colorScheme.surface,
       child: Container(
         width: 320,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           border: Border(
-            right: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+            right: BorderSide(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+              width: 1,
+            ),
           ),
         ),
         child: Column(
@@ -169,18 +176,21 @@ class _AppSidebarState extends State<AppSidebar> {
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: Colors.blue.shade600,
+                          color: colorScheme.primary,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.inventory_2, color: Colors.white, size: 18),
+                        child: Icon(
+                          Icons.inventory_2_rounded,
+                          color: colorScheme.onPrimary,
+                          size: 18,
+                        ),
                       ),
                       const SizedBox(width: 12),
-                      const Text(
-                        'BizMate',
-                        style: TextStyle(
-                          fontSize: 20,
+                      Text(
+                        AppLocalizations.of(context)!.bizmate,
+                        style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF0F172A),
+                          color: colorScheme.onSurface,
                         ),
                       ),
                     ],
@@ -196,9 +206,11 @@ class _AppSidebarState extends State<AppSidebar> {
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.grey.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade200),
+                            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+                            ),
                           ),
                           child: const BranchSelectorWidget(
                             isCompact: false,
@@ -211,94 +223,112 @@ class _AppSidebarState extends State<AppSidebar> {
                 ],
               ),
             ),
-          // Menu Items
+          // Menu Items (ẩn theo quyền)
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                    _buildSidebarItem(
-                      context,
-                      icon: Icons.dashboard,
-                      label: 'Tổng quan',
-                      isActive: widget.activeRoute == AppRoutes.home,
-                      onTap: () => _handleMenuTap(AppRoutes.home),
-                    ),
-                      const SizedBox(height: 4),
-                      _buildOrdersMenu(context),
-                      const SizedBox(height: 4),
-                      _buildProductsMenu(context),
-                      const SizedBox(height: 4),
-                      _buildInventoryMenu(context),
-                      const SizedBox(height: 4),
-                      _buildCustomersMenu(context),
-                      const SizedBox(height: 4),
-                      _buildStaffMenu(context),
-                      const SizedBox(height: 4),
-                      _buildReportsMenu(context),
-                      const SizedBox(height: 4),
-                      _buildSettingsMenu(context),
-                    ],
-                  ),
+                child: Consumer<AuthProvider>(
+                  builder: (context, auth, child) {
+                    return SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          _buildSidebarItem(
+                            context,
+                            icon: Icons.dashboard,
+                            label: AppLocalizations.of(context)!.overview,
+                            isActive: widget.activeRoute == AppRoutes.home,
+                            onTap: () => _handleMenuTap(AppRoutes.home),
+                          ),
+                          const SizedBox(height: 4),
+                          _buildOrdersMenu(context, auth),
+                          const SizedBox(height: 4),
+                          _buildProductsMenu(context, auth),
+                          const SizedBox(height: 4),
+                          _buildInventoryMenu(context, auth),
+                          const SizedBox(height: 4),
+                          _buildCustomersMenu(context, auth),
+                          const SizedBox(height: 4),
+                          _buildStaffMenu(context, auth),
+                          const SizedBox(height: 4),
+                          _buildReportsMenu(context, auth),
+                          const SizedBox(height: 4),
+                          _buildSettingsMenu(context, auth),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
-          // Support Card
+          // Language quick switch
             Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  border: Border.all(color: Colors.blue.shade100),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'CẦN HỖ TRỢ?',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue.shade600,
-                        letterSpacing: 1.2,
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12),
+              child: Consumer<LocaleProvider>(
+                builder: (context, localeProvider, _) {
+                  final l10n = AppLocalizations.of(context)!;
+                  final isVi = localeProvider.locale.languageCode == 'vi';
+                  return Material(
+                    color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                    child: PopupMenuButton<Locale>(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      offset: const Offset(0, -80),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Liên hệ đội ngũ kỹ thuật ngay.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.blue.shade800,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    InkWell(
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Tính năng đang được phát triển')),
-                        );
-                      },
-                      child: Row(
-                        children: [
-                          Text(
-                            'Gửi yêu cầu',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue.shade700,
+                      onSelected: (locale) => localeProvider.setLocale(locale),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.public_rounded,
+                              size: 18,
+                              color: colorScheme.primary,
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(Icons.arrow_forward, size: 14, color: Colors.blue.shade700),
-                        ],
+                            const SizedBox(width: 8),
+                            Text(
+                              isVi ? 'VN' : 'EN',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.arrow_drop_down_rounded,
+                              size: 20,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
                       ),
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: const Locale('vi'),
+                          child: Row(
+                            children: [
+                              Text('🇻🇳', style: const TextStyle(fontSize: 18)),
+                              const SizedBox(width: 12),
+                              Text(l10n.vietnamese),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: const Locale('en'),
+                          child: Row(
+                            children: [
+                              Text('🇬🇧', style: const TextStyle(fontSize: 18)),
+                              const SizedBox(width: 12),
+                              Text(l10n.english),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ],
@@ -314,29 +344,30 @@ class _AppSidebarState extends State<AppSidebar> {
     required bool isActive,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF0F172A) : Colors.transparent,
+          color: isActive ? colorScheme.primaryContainer : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
             Icon(
               icon,
-              size: 18,
-              color: isActive ? Colors.white : const Color(0xFF64748B),
+              size: 20,
+              color: isActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
             ),
             const SizedBox(width: 12),
             Text(
               label,
-              style: TextStyle(
-                fontSize: 14,
+              style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w500,
-                color: isActive ? Colors.white : const Color(0xFF64748B),
+                color: isActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -345,29 +376,36 @@ class _AppSidebarState extends State<AppSidebar> {
     );
   }
 
-  Widget _buildOrdersMenu(BuildContext context) {
+  Widget _buildOrdersMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.salesInvoice, AppRoutes.salesHistory),
+      (l10n.returnInvoice, AppRoutes.returnInvoice),
+      (l10n.cancelInvoice, AppRoutes.cancelInvoice),
+      (l10n.eInvoice, AppRoutes.electronicInvoice),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isOrdersActive = _selectedMenuGroup == 'orders' ||
-        activeRoute == AppRoutes.salesHistory ||
-        activeRoute == AppRoutes.returnInvoice ||
-        activeRoute == AppRoutes.cancelInvoice ||
-        activeRoute == AppRoutes.electronicInvoice;
-    
+    final bool isOrdersActive = visible.any((e) => e.$2 == activeRoute);
+
     return Column(
       children: [
         InkWell(
           onTap: () {
             setState(() {
               if (!_isOrdersExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'orders';
                 _isOrdersExpanded = true;
                 _collapseAllExcept('orders');
-                _handleMenuTap(AppRoutes.salesHistory);
+                _handleMenuTap(visible.first.$2);
               } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isOrdersExpanded = false;
-                _selectedMenuGroup = null;
               }
             });
           },
@@ -375,31 +413,30 @@ class _AppSidebarState extends State<AppSidebar> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isOrdersActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isOrdersActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.shopping_cart,
-                  size: 18,
-                  color: isOrdersActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.shopping_cart_rounded,
+                  size: 20,
+                  color: isOrdersActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Đơn hàng',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.orders,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isOrdersActive ? Colors.white : const Color(0xFF64748B),
+                      color: isOrdersActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isOrdersExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isOrdersActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isOrdersActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -407,33 +444,15 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isOrdersExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Hóa đơn bán hàng',
-            isActive: activeRoute == AppRoutes.salesHistory,
-            onTap: () => _handleMenuTap(AppRoutes.salesHistory),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Hóa đơn trả hàng',
-            isActive: activeRoute == AppRoutes.returnInvoice,
-            onTap: () => _handleMenuTap(AppRoutes.returnInvoice),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Hóa đơn hủy',
-            isActive: activeRoute == AppRoutes.cancelInvoice,
-            onTap: () => _handleMenuTap(AppRoutes.cancelInvoice),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Hóa đơn điện tử',
-            isActive: activeRoute == AppRoutes.electronicInvoice,
-            onTap: () => _handleMenuTap(AppRoutes.electronicInvoice),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );
@@ -445,13 +464,15 @@ class _AppSidebarState extends State<AppSidebar> {
     required bool isActive,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF0F172A).withValues(alpha: 0.1) : Colors.transparent,
+          color: isActive ? colorScheme.primaryContainer.withValues(alpha: 0.5) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
@@ -460,17 +481,16 @@ class _AppSidebarState extends State<AppSidebar> {
               width: 4,
               height: 4,
               decoration: BoxDecoration(
-                color: isActive ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                color: isActive ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 shape: BoxShape.circle,
               ),
             ),
             const SizedBox(width: 12),
             Text(
               label,
-              style: TextStyle(
-                fontSize: 13,
+              style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w500,
-                color: isActive ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                color: isActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -479,29 +499,36 @@ class _AppSidebarState extends State<AppSidebar> {
     );
   }
 
-  Widget _buildProductsMenu(BuildContext context) {
+  Widget _buildProductsMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.productList, AppRoutes.inventory),
+      (l10n.productGroup, AppRoutes.productGroup),
+      (l10n.serviceList, AppRoutes.serviceList),
+      (l10n.serviceGroup, AppRoutes.serviceGroup),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isProductsActive = _selectedMenuGroup == 'products' ||
-        activeRoute == AppRoutes.inventory ||
-        activeRoute == AppRoutes.productGroup ||
-        activeRoute == AppRoutes.serviceList ||
-        activeRoute == AppRoutes.serviceGroup;
-    
+    final bool isProductsActive = visible.any((e) => e.$2 == activeRoute);
+
     return Column(
       children: [
         InkWell(
           onTap: () {
-            setState(() {
-              if (!_isProductsExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'products';
+setState(() {
+                if (!_isProductsExpanded) {
                 _isProductsExpanded = true;
                 _collapseAllExcept('products');
-                _handleMenuTap(AppRoutes.inventory);
+                _handleMenuTap(visible.first.$2);
               } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isProductsExpanded = false;
-                _selectedMenuGroup = null;
               }
             });
           },
@@ -509,31 +536,30 @@ class _AppSidebarState extends State<AppSidebar> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isProductsActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isProductsActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.inventory_2,
-                  size: 18,
-                  color: isProductsActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.inventory_2_rounded,
+                  size: 20,
+                  color: isProductsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Sản phẩm',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.products,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isProductsActive ? Colors.white : const Color(0xFF64748B),
+                      color: isProductsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isProductsExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isProductsActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isProductsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -541,93 +567,81 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isProductsExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Danh sách sản phẩm',
-            isActive: activeRoute == AppRoutes.inventory,
-            onTap: () => _handleMenuTap(AppRoutes.inventory),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Nhóm sản phẩm',
-            isActive: activeRoute == AppRoutes.productGroup,
-            onTap: () => _handleMenuTap(AppRoutes.productGroup),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Danh sách dịch vụ',
-            isActive: activeRoute == AppRoutes.serviceList,
-            onTap: () => _handleMenuTap(AppRoutes.serviceList),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Nhóm dịch vụ',
-            isActive: activeRoute == AppRoutes.serviceGroup,
-            onTap: () => _handleMenuTap(AppRoutes.serviceGroup),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );
   }
 
-  Widget _buildInventoryMenu(BuildContext context) {
+  Widget _buildInventoryMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.stockOverview, AppRoutes.stockOverview),
+      (l10n.purchase, AppRoutes.purchase),
+      (l10n.transferStock, AppRoutes.transferStock),
+      (l10n.adjustStock, AppRoutes.adjustStock),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isInventoryActive = _selectedMenuGroup == 'inventory' ||
-        activeRoute == AppRoutes.stockOverview ||
-        activeRoute == AppRoutes.purchase ||
-        activeRoute == AppRoutes.transferStock ||
-        activeRoute == AppRoutes.adjustStock;
+    final bool isInventoryActive = visible.any((e) => e.$2 == activeRoute);
     
     return Column(
       children: [
         InkWell(
-          onTap: () {
-            setState(() {
-              if (!_isInventoryExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'inventory';
-                _isInventoryExpanded = true;
-                _collapseAllExcept('inventory');
-                _handleMenuTap(AppRoutes.stockOverview);
-              } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
-                _isInventoryExpanded = false;
-                _selectedMenuGroup = null;
-              }
-            });
-          },
+            onTap: () {
+              setState(() {
+                if (!_isInventoryExpanded) {
+                  _isInventoryExpanded = true;
+                  _collapseAllExcept('inventory');
+                  _handleMenuTap(visible.first.$2);
+                } else {
+                  _isInventoryExpanded = false;
+                }
+              });
+            },
           borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isInventoryActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isInventoryActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.warehouse,
-                  size: 18,
-                  color: isInventoryActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.warehouse_rounded,
+                  size: 20,
+                  color: isInventoryActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Quản lý kho',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.inventoryManagement,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isInventoryActive ? Colors.white : const Color(0xFF64748B),
+                      color: isInventoryActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isInventoryExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isInventoryActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isInventoryActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -635,43 +649,36 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isInventoryExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Tồn kho',
-            isActive: activeRoute == AppRoutes.stockOverview,
-            onTap: () => _handleMenuTap(AppRoutes.stockOverview),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Nhập kho',
-            isActive: activeRoute == AppRoutes.purchase,
-            onTap: () => _handleMenuTap(AppRoutes.purchase),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Chuyển kho',
-            isActive: activeRoute == AppRoutes.transferStock,
-            onTap: () => _handleMenuTap(AppRoutes.transferStock),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Điều chỉnh kho',
-            isActive: activeRoute == AppRoutes.adjustStock,
-            onTap: () => _handleMenuTap(AppRoutes.adjustStock),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );
   }
 
-  Widget _buildCustomersMenu(BuildContext context) {
+  Widget _buildCustomersMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.customerList, AppRoutes.customerManagement),
+      (l10n.customerGroup, AppRoutes.customerGroupManagement),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isCustomersActive = _selectedMenuGroup == 'customers' ||
-        activeRoute == AppRoutes.customerManagement ||
-        activeRoute == AppRoutes.customerGroupManagement;
+    final bool isCustomersActive = visible.any((e) => e.$2 == activeRoute);
 
     return Column(
       children: [
@@ -679,15 +686,11 @@ class _AppSidebarState extends State<AppSidebar> {
           onTap: () {
             setState(() {
               if (!_isCustomersExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'customers';
                 _isCustomersExpanded = true;
                 _collapseAllExcept('customers');
-                _handleMenuTap(AppRoutes.customerManagement);
+                _handleMenuTap(visible.first.$2);
               } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isCustomersExpanded = false;
-                _selectedMenuGroup = null;
               }
             });
           },
@@ -695,31 +698,30 @@ class _AppSidebarState extends State<AppSidebar> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isCustomersActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isCustomersActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.people,
-                  size: 18,
-                  color: isCustomersActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.people_rounded,
+                  size: 20,
+                  color: isCustomersActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Khách hàng',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.customers,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isCustomersActive ? Colors.white : const Color(0xFF64748B),
+                      color: isCustomersActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isCustomersExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isCustomersActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isCustomersActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -727,29 +729,36 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isCustomersExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Danh sách khách hàng',
-            isActive: activeRoute == AppRoutes.customerManagement,
-            onTap: () => _handleMenuTap(AppRoutes.customerManagement),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Nhóm khách hàng',
-            isActive: activeRoute == AppRoutes.customerGroupManagement,
-            onTap: () => _handleMenuTap(AppRoutes.customerGroupManagement),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );
   }
 
-  Widget _buildStaffMenu(BuildContext context) {
+  Widget _buildStaffMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.employeeList, AppRoutes.employeeManagement),
+      (l10n.employeeGroup, AppRoutes.employeeGroupManagement),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isStaffActive = _selectedMenuGroup == 'staff' ||
-        activeRoute == AppRoutes.employeeManagement ||
-        activeRoute == AppRoutes.employeeGroupManagement;
+    final bool isStaffActive = visible.any((e) => e.$2 == activeRoute);
 
     return Column(
       children: [
@@ -757,15 +766,11 @@ class _AppSidebarState extends State<AppSidebar> {
           onTap: () {
             setState(() {
               if (!_isStaffExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'staff';
                 _isStaffExpanded = true;
                 _collapseAllExcept('staff');
-                _handleMenuTap(AppRoutes.employeeManagement);
+                _handleMenuTap(visible.first.$2);
               } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isStaffExpanded = false;
-                _selectedMenuGroup = null;
               }
             });
           },
@@ -773,31 +778,30 @@ class _AppSidebarState extends State<AppSidebar> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isStaffActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isStaffActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.badge,
-                  size: 18,
-                  color: isStaffActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.badge_rounded,
+                  size: 20,
+                  color: isStaffActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Quản lý nhân viên',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.staffManagement,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isStaffActive ? Colors.white : const Color(0xFF64748B),
+                      color: isStaffActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isStaffExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isStaffActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isStaffActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -805,33 +809,41 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isStaffExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Danh sách nhân viên',
-            isActive: activeRoute == AppRoutes.employeeManagement,
-            onTap: () => _handleMenuTap(AppRoutes.employeeManagement),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Nhóm nhân viên',
-            isActive: activeRoute == AppRoutes.employeeGroupManagement,
-            onTap: () => _handleMenuTap(AppRoutes.employeeGroupManagement),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );
   }
 
-  Widget _buildReportsMenu(BuildContext context) {
+  Widget _buildReportsMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.salesReport, AppRoutes.salesReport),
+      (l10n.profitReport, AppRoutes.profitReport),
+      (l10n.stockMovementReport, AppRoutes.stockMovementReport),
+      (l10n.debtReport, AppRoutes.debtReport),
+      (l10n.salesReturnReport, AppRoutes.salesReturnReport),
+      (l10n.lowStockReport, AppRoutes.lowStockReport),
+      (l10n.expiryReport, AppRoutes.expiryReport),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isReportsActive = _selectedMenuGroup == 'reports' ||
-        activeRoute == AppRoutes.reports ||
-        activeRoute == AppRoutes.salesReport ||
-        activeRoute == AppRoutes.profitReport ||
-        activeRoute == AppRoutes.stockMovementReport ||
-        activeRoute == AppRoutes.debtReport ||
-        activeRoute == AppRoutes.salesReturnReport;
+    final bool isReportsActive = visible.any((e) => e.$2 == activeRoute);
 
     return Column(
       children: [
@@ -839,15 +851,11 @@ class _AppSidebarState extends State<AppSidebar> {
           onTap: () {
             setState(() {
               if (!_isReportsExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'reports';
                 _isReportsExpanded = true;
                 _collapseAllExcept('reports');
-                _handleMenuTap(AppRoutes.salesReport);
+                _handleMenuTap(visible.first.$2);
               } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isReportsExpanded = false;
-                _selectedMenuGroup = null;
               }
             });
           },
@@ -855,31 +863,30 @@ class _AppSidebarState extends State<AppSidebar> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isReportsActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isReportsActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.bar_chart,
-                  size: 18,
-                  color: isReportsActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.bar_chart_rounded,
+                  size: 20,
+                  color: isReportsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Báo cáo',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.reports,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isReportsActive ? Colors.white : const Color(0xFF64748B),
+                      color: isReportsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isReportsExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isReportsActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isReportsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -887,52 +894,39 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isReportsExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Báo cáo doanh số',
-            isActive: activeRoute == AppRoutes.salesReport,
-            onTap: () => _handleMenuTap(AppRoutes.salesReport),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Báo cáo lợi nhuận',
-            isActive: activeRoute == AppRoutes.profitReport,
-            onTap: () => _handleMenuTap(AppRoutes.profitReport),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Báo cáo nhập xuất tồn',
-            isActive: activeRoute == AppRoutes.stockMovementReport,
-            onTap: () => _handleMenuTap(AppRoutes.stockMovementReport),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Báo cáo công nợ',
-            isActive: activeRoute == AppRoutes.debtReport,
-            onTap: () => _handleMenuTap(AppRoutes.debtReport),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Báo cáo hàng trả',
-            isActive: activeRoute == AppRoutes.salesReturnReport,
-            onTap: () => _handleMenuTap(AppRoutes.salesReturnReport),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );
   }
 
-  Widget _buildSettingsMenu(BuildContext context) {
+  Widget _buildSettingsMenu(BuildContext context, AuthProvider auth) {
+    final l10n = AppLocalizations.of(context)!;
+    final subItems = [
+      (l10n.shopInfo, AppRoutes.shopSettings),
+      (l10n.branchManagement, AppRoutes.branchManagement),
+      (l10n.eInvoice, AppRoutes.electronicInvoice),
+      (l10n.advancedFeatures, AppRoutes.advancedSettings),
+      (l10n.appAccount, AppRoutes.appAccountSettings),
+    ];
+    final visible = subItems.where((e) {
+      final perm = PermissionRoutes.requiredPermissionForRoute(e.$2);
+      return perm == null || auth.hasPermission(perm);
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final activeRoute = widget.activeRoute ?? '';
-    final bool isSettingsActive = _selectedMenuGroup == 'settings' ||
-        activeRoute == AppRoutes.shopSettings ||
-        activeRoute == AppRoutes.branchManagement ||
-        activeRoute == AppRoutes.advancedSettings ||
-        activeRoute == AppRoutes.appAccountSettings;
+    final bool isSettingsActive = visible.any((e) => e.$2 == activeRoute);
 
     return Column(
       children: [
@@ -940,15 +934,11 @@ class _AppSidebarState extends State<AppSidebar> {
           onTap: () {
             setState(() {
               if (!_isSettingsExpanded) {
-                // Nếu chưa expand, expand và navigate đến route đầu tiên
-                _selectedMenuGroup = 'settings';
                 _isSettingsExpanded = true;
                 _collapseAllExcept('settings');
-                _handleMenuTap(AppRoutes.shopSettings);
+                _handleMenuTap(visible.first.$2);
               } else {
-                // Nếu đã expand, chỉ collapse và reset selected menu
                 _isSettingsExpanded = false;
-                _selectedMenuGroup = null;
               }
             });
           },
@@ -956,31 +946,30 @@ class _AppSidebarState extends State<AppSidebar> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isSettingsActive ? const Color(0xFF0F172A) : Colors.transparent,
+              color: isSettingsActive ? colorScheme.primaryContainer : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
-                  Icons.settings,
-                  size: 18,
-                  color: isSettingsActive ? Colors.white : const Color(0xFF64748B),
+                  Icons.settings_rounded,
+                  size: 20,
+                  color: isSettingsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Cài đặt',
-                    style: TextStyle(
-                      fontSize: 14,
+                    AppLocalizations.of(context)!.settings,
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: isSettingsActive ? Colors.white : const Color(0xFF64748B),
+                      color: isSettingsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
                 Icon(
                   _isSettingsExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: isSettingsActive ? Colors.white : const Color(0xFF64748B),
+                  size: 20,
+                  color: isSettingsActive ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -988,40 +977,15 @@ class _AppSidebarState extends State<AppSidebar> {
         ),
         if (_isSettingsExpanded) ...[
           const SizedBox(height: 4),
-          _buildSubMenuItem(
-            context,
-            label: 'Thông tin cửa hàng',
-            isActive: activeRoute == AppRoutes.shopSettings,
-            onTap: () => _handleMenuTap(AppRoutes.shopSettings),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Chi nhánh',
-            isActive: activeRoute == AppRoutes.branchManagement,
-            onTap: () => _handleMenuTap(AppRoutes.branchManagement),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Hóa đơn điện tử',
-            isActive: false, // chia sẻ cùng màn với Thông tin cửa hàng
-            onTap: () => _handleMenuTap(AppRoutes.shopSettings),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Tính năng nâng cao',
-            isActive: activeRoute == AppRoutes.advancedSettings,
-            onTap: () => _handleMenuTap(AppRoutes.advancedSettings),
-          ),
-          const SizedBox(height: 2),
-          _buildSubMenuItem(
-            context,
-            label: 'Tài khoản app',
-            isActive: activeRoute == AppRoutes.appAccountSettings,
-            onTap: () => _handleMenuTap(AppRoutes.appAccountSettings),
-          ),
+          ...visible.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _buildSubMenuItem(
+              context,
+              label: e.$1,
+              isActive: activeRoute == e.$2,
+              onTap: () => _handleMenuTap(e.$2),
+            ),
+          )),
         ],
       ],
     );

@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/product_model.dart';
 import '../models/category_model.dart';
@@ -18,18 +18,40 @@ class ProductProvider with ChangeNotifier {
   StockHistoryService? _stockHistoryService;
   
   List<ProductModel> _products = [];
+  /// Chỉ mục mã vạch -> sản phẩm (O(1) tra cứu, <100ms khi quét).
+  Map<String, ProductModel> _barcodeIndex = {};
   bool _isLoading = false;
   String? _errorMessage;
   String? _searchQuery;
-  bool _disposed = false; // Flag để kiểm tra xem provider đã bị dispose chưa
-  StreamSubscription<List<ProductModel>>? _productsSubscription; // Real-time Firestore (PRO)
+  bool _disposed = false;
+  DocumentSnapshot? _productsLastDoc;
+  bool _isLoadingMore = false;
+  static const int _pageSize = 20;
+
+  void _rebuildBarcodeIndex() {
+    final index = <String, ProductModel>{};
+    for (final p in _products) {
+      final b = p.barcode?.trim().toLowerCase();
+      if (b != null && b.isNotEmpty) index[b] = p;
+    }
+    _barcodeIndex = index;
+  }
 
   // Getters
   List<ProductModel> get products => _products;
+
+  /// Tra cứu sản phẩm theo mã vạch O(1) — ưu tiên tốc độ <100ms.
+  ProductModel? findProductByBarcode(String barcode) {
+    final key = barcode.trim().toLowerCase();
+    if (key.isEmpty) return null;
+    return _barcodeIndex[key];
+  }
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   String? get searchQuery => _searchQuery;
   int get productCount => _products.length;
+  bool get hasMoreProducts => _productsLastDoc != null;
+  bool get isLoadingMore => _isLoadingMore;
 
   // Category getters
   List<CategoryModel> get categories => _categories;
@@ -42,12 +64,11 @@ class ProductProvider with ChangeNotifier {
   String? _categoryErrorMessage;
 
   ProductProvider(this.authProvider, {this.branchProvider}) {
-    // Lắng nghe thay đổi từ AuthProvider để cập nhật ProductService
     authProvider.addListener(_onAuthChanged);
     _initializeService();
-    // PRO: bắt đầu lắng nghe Firestore real-time ngay khi provider khởi tạo (nếu đã đăng nhập + isPro)
-    if (authProvider.user != null && authProvider.isPro) {
-      startListening();
+    // Phân trang: tải trang đầu (limit 20) để tiết kiệm lượt đọc Firestore.
+    if (authProvider.user != null) {
+      loadProductsPaginated();
     }
     // Lắng nghe thay đổi selectedBranchId để reload products
     authProvider.addListener(_onSelectedBranchChanged);
@@ -99,21 +120,17 @@ class ProductProvider with ChangeNotifier {
       if (!wasPro && isPro) {
         migrateLocalToCloud();
       } else {
-        loadProducts();
+        loadProductsPaginated();
       }
 
       if (isPro) {
-        startListening();
-        // PRO: light sync từ Cloud để cập nhật tồn kho/dữ liệu mới nhất (loadProducts đã gọi ở trên khi wasPro)
         _performLightSyncFromCloud();
-      } else {
-        _cancelProductsSubscription();
       }
     } else {
-      _cancelProductsSubscription();
       _productService = null;
       _stockHistoryService = null;
       _products = [];
+      _barcodeIndex = {};
       notifyListeners();
     }
   }
@@ -125,6 +142,7 @@ class ProductProvider with ChangeNotifier {
       if (_disposed) return;
       if (products.isEmpty) return;
       _products = products;
+      _rebuildBarcodeIndex();
       if (!kIsWeb) {
         _productService?.syncProductsToLocal(products);
       }
@@ -137,12 +155,6 @@ class ProductProvider with ChangeNotifier {
         debugPrint('⚠️ ProductProvider light sync error: $e');
       }
     });
-  }
-
-  /// Hủy subscription real-time (khi logout hoặc chuyển BASIC).
-  void _cancelProductsSubscription() {
-    _productsSubscription?.cancel();
-    _productsSubscription = null;
   }
 
   /// Xử lý khi selectedBranchId thay đổi
@@ -261,6 +273,18 @@ class ProductProvider with ChangeNotifier {
     }
   }
 
+  /// Đồng bộ tăng dần khi app resume: chỉ đọc doc có updatedAt > lastSync, merge SQLite rồi reload.
+  /// Giảm lượt đọc Firestore so với full sync.
+  Future<void> syncIncremental() async {
+    if (_productService == null || !authProvider.isPro) return;
+    try {
+      await _productService!.syncIncrementalFromCloud();
+      await loadProducts();
+    } catch (e) {
+      if (kDebugMode) debugPrint('ProductProvider syncIncremental error: $e');
+    }
+  }
+
   /// Đồng bộ toàn bộ dữ liệu từ Firestore về SQLite
   /// Được gọi khi khởi tạo ứng dụng hoặc khi người dùng nhấn 'Đồng bộ'
   Future<void> syncAllFromCloud() async {
@@ -303,13 +327,14 @@ class ProductProvider with ChangeNotifier {
     try {
       _isLoading = true;
       _errorMessage = null;
+      _productsLastDoc = null;
       _safeNotifyListeners();
 
-      // Truyền selectedBranchId để filter theo chi nhánh
       _products = await _productService!.getProducts(
         includeInactive: includeInactive,
         activeBranchId: authProvider.selectedBranchId,
       );
+      _rebuildBarcodeIndex();
 
       _isLoading = false;
       _safeNotifyListeners();
@@ -319,6 +344,63 @@ class ProductProvider with ChangeNotifier {
       if (kDebugMode) {
         debugPrint('ProductProvider loadProducts error: $_errorMessage');
       }
+      _safeNotifyListeners();
+    }
+  }
+
+  /// Tải trang đầu (phân trang, 1 lần đọc Firestore). Dùng cho màn danh sách sản phẩm.
+  Future<void> loadProductsPaginated({bool includeInactive = false}) async {
+    if (_productService == null) {
+      _errorMessage = 'Chưa đăng nhập';
+      _safeNotifyListeners();
+      return;
+    }
+    try {
+      _isLoading = true;
+      _errorMessage = null;
+      _productsLastDoc = null;
+      _safeNotifyListeners();
+
+      final result = await _productService!.getProductsPaginated(
+        limit: _pageSize,
+        startAfterDocument: null,
+        includeInactive: includeInactive,
+      );
+      if (_disposed) return;
+      _products = result.products;
+      _rebuildBarcodeIndex();
+      _productsLastDoc = result.lastDoc;
+      _isLoading = false;
+      _safeNotifyListeners();
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = 'Lỗi khi tải danh sách: ${e.toString()}';
+      if (kDebugMode) debugPrint('ProductProvider loadProductsPaginated error: $_errorMessage');
+      _safeNotifyListeners();
+    }
+  }
+
+  /// Tải thêm trang tiếp theo (phân trang).
+  Future<void> loadMoreProducts({bool includeInactive = false}) async {
+    if (_productService == null || _productsLastDoc == null || _isLoadingMore) return;
+    try {
+      _isLoadingMore = true;
+      _safeNotifyListeners();
+
+      final result = await _productService!.getProductsPaginated(
+        limit: _pageSize,
+        startAfterDocument: _productsLastDoc,
+        includeInactive: includeInactive,
+      );
+      if (_disposed) return;
+      _products = [..._products, ...result.products];
+      _rebuildBarcodeIndex();
+      _productsLastDoc = result.lastDoc;
+      _isLoadingMore = false;
+      _safeNotifyListeners();
+    } catch (e) {
+      _isLoadingMore = false;
+      if (kDebugMode) debugPrint('ProductProvider loadMoreProducts error: $e');
       _safeNotifyListeners();
     }
   }
@@ -374,6 +456,75 @@ class ProductProvider with ChangeNotifier {
         debugPrint('ProductProvider getProductById error: $e');
       }
       return null;
+    }
+  }
+
+  /// Import hàng loạt: dùng WriteBatch Firestore (tối đa 500/batch).
+  /// Nếu 'Mã Sản Phẩm' (code) đã tồn tại → cập nhật; chưa → tạo mới.
+  /// Gán branchId hiện tại (BranchProvider) cho sản phẩm mới.
+  /// [onProgress] nhận 0.0..1.0 để hiển thị LinearProgressIndicator.
+  Future<({bool success, int count, String? error})> importProductsFromList(
+    List<ProductModel> products, {
+    void Function(double)? onProgress,
+  }) async {
+    if (_productService == null) {
+      return (success: false, count: 0, error: 'Chưa đăng nhập');
+    }
+    if (products.isEmpty) {
+      onProgress?.call(1.0);
+      return (success: true, count: 0, error: null);
+    }
+
+    final branchId = branchProvider?.currentBranchId ?? 'default';
+    final codeToExisting = <String, ProductModel>{};
+    for (final p in _products) {
+      final c = p.code?.trim();
+      if (c != null && c.isNotEmpty) codeToExisting[c] = p;
+    }
+
+    final toWrite = <ProductModel>[];
+    for (var i = 0; i < products.length; i++) {
+      final p = products[i];
+      final code = p.code?.trim();
+      if (code != null && code.isNotEmpty && codeToExisting.containsKey(code)) {
+        final existing = codeToExisting[code]!;
+        final newPrices = Map<String, double>.from(existing.branchPrices);
+        newPrices[branchId] = p.price;
+        final newStock = Map<String, double>.from(existing.branchStock);
+        newStock[branchId] = p.stock;
+        toWrite.add(existing.copyWith(
+          name: p.name,
+          units: p.units,
+          importPrice: p.importPrice,
+          branchPrices: newPrices,
+          branchStock: newStock,
+          description: p.description,
+          updatedAt: DateTime.now(),
+        ));
+      } else {
+        final newId = 'import_${DateTime.now().millisecondsSinceEpoch}_$i';
+        toWrite.add(p.copyWith(
+          id: newId,
+          branchPrices: {branchId: p.price},
+          branchStock: {branchId: p.stock},
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ));
+      }
+    }
+
+    try {
+      _errorMessage = null;
+      _safeNotifyListeners();
+      await _productService!.importProductsBulk(toWrite, onProgress: onProgress);
+      await loadProducts();
+      onProgress?.call(1.0);
+      return (success: true, count: toWrite.length, error: null);
+    } catch (e) {
+      _errorMessage = 'Lỗi import: ${e.toString()}';
+      if (kDebugMode) debugPrint('ProductProvider importProductsFromList: $_errorMessage');
+      _safeNotifyListeners();
+      return (success: false, count: 0, error: _errorMessage);
     }
   }
 
@@ -554,33 +705,6 @@ class ProductProvider with ChangeNotifier {
       }
       _safeNotifyListeners();
     }
-  }
-
-  /// Lắng nghe thay đổi real-time từ Firestore (chỉ cho PRO). Tự cập nhật _products và UI.
-  void startListening() {
-    if (_productService == null || !authProvider.isPro) return;
-
-    _cancelProductsSubscription();
-
-    final stream = _productService!.watchProducts();
-    if (stream == null) return;
-
-    _productsSubscription = stream.listen(
-      (products) {
-        if (_disposed) return;
-        _products = products;
-        _safeNotifyListeners();
-        // Đồng bộ xuống SQLite để khi mất mạng vẫn có dữ liệu mới nhất (không chạy trên web)
-        if (!kIsWeb) {
-          _productService?.syncProductsToLocal(products);
-        }
-      },
-      onError: (Object e, StackTrace st) {
-        if (kDebugMode) {
-          debugPrint('ProductProvider watchProducts error: $e');
-        }
-      },
-    );
   }
 
   /// Clear search query
@@ -915,12 +1039,12 @@ class ProductProvider with ChangeNotifier {
         // Tính nhập trong kỳ: Tổng quantityChange > 0
         double incomingStock = historyInPeriod
             .where((h) => h.quantityChange > 0)
-            .fold(0.0, (sum, h) => sum + h.quantityChange);
+            .fold(0.0, (acc, h) => acc + h.quantityChange);
 
         // Tính xuất trong kỳ: Tổng |quantityChange| với quantityChange < 0
         double outgoingStock = historyInPeriod
             .where((h) => h.quantityChange < 0)
-            .fold(0.0, (sum, h) => sum + h.quantityChange.abs());
+            .fold(0.0, (acc, h) => acc + h.quantityChange.abs());
 
         // Tính tồn cuối kỳ: Lấy bản ghi cuối cùng có timestamp <= endDate
         double closingStock = openingStock; // Mặc định bằng tồn đầu kỳ

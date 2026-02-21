@@ -2,13 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
+import '../../controllers/employee_group_provider.dart';
 import '../../models/user_model.dart';
+import '../../services/employee_service.dart';
 import '../../services/firebase_service.dart';
 import '../../utils/platform_utils.dart';
+import 'employee_management_screen_mobile.dart';
+import 'employee_management_screen_desktop.dart';
 
-/// Màn hình danh sách nhân viên & điều khiển allowRegistration (mobile/desktop theo platform).
+/// Tệp điều hướng chính: chọn Mobile hoặc Desktop theo platform.
+/// Giữ toàn bộ state và logic (load nhân viên, bật/tắt tài khoản, phê duyệt, đổi chi nhánh).
 class EmployeeManagementScreen extends StatefulWidget {
-  /// Nếu null: dùng [isMobilePlatform].
   final bool? forceMobile;
 
   const EmployeeManagementScreen({super.key, this.forceMobile});
@@ -20,37 +24,40 @@ class EmployeeManagementScreen extends StatefulWidget {
 
 class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
   final FirebaseService _firebaseService = FirebaseService();
+  List<UserModel> _employees = [];
   bool _isLoading = false;
-  List<UserModel> _pendingStaff = [];
+
+  bool get _useMobileLayout =>
+      widget.forceMobile ?? isMobilePlatform;
 
   @override
   void initState() {
     super.initState();
-    _loadPendingStaff();
+    _loadEmployees();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<EmployeeGroupProvider>().loadEmployeeGroups();
+    });
   }
 
-  Future<void> _loadPendingStaff() async {
+  Future<void> _loadEmployees() async {
     final authProvider = context.read<AuthProvider>();
     final shopId = authProvider.shop?.id;
     if (shopId == null) return;
 
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
-      final staff =
-          await _firebaseService.getPendingStaffByShopId(shopId);
+      final service = EmployeeService(shopId: shopId);
+      final list =
+          await service.getEmployees(includeUnapproved: true);
       if (mounted) {
         setState(() {
-          _pendingStaff = staff;
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
+          _employees = list;
           _isLoading = false;
         });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -59,21 +66,15 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
       AuthProvider authProvider, bool value) async {
     final shop = authProvider.shop;
     if (shop == null) return;
-
     try {
       await _firebaseService.updateShopRegistrationStatus(shop.id, value);
-      final updatedShop = shop.copyWith(
-        allowRegistration: value,
-      );
-      await authProvider.updateShop(updatedShop);
+      await authProvider.updateShop(shop.copyWith(allowRegistration: value));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              value
-                  ? 'Đã bật cho phép nhân viên đăng ký.'
-                  : 'Đã tắt cho phép nhân viên đăng ký.',
-            ),
+            content: Text(value
+                ? 'Đã bật cho phép nhân viên đăng ký.'
+                : 'Đã tắt cho phép nhân viên đăng ký.'),
           ),
         );
       }
@@ -81,7 +82,7 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi khi cập nhật cấu hình: $e'),
+            content: Text('Lỗi cập nhật cấu hình: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -89,26 +90,29 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
     }
   }
 
-  Future<void> _approveStaff(
-    UserModel user,
-    bool approve, {
-    String? workingBranchId,
-  }) async {
+  Future<void> _toggleApproval(UserModel employee, bool value) async {
+    final shopId = context.read<AuthProvider>().shop?.id;
+    if (shopId == null) return;
+    if (value && (employee.workingBranchId == null || employee.workingBranchId!.isEmpty)) {
+      if (mounted) _showApproveStaffDialog(employee);
+      return;
+    }
     try {
-      await _firebaseService.updateStaffApprovalStatus(
-        uid: user.uid,
-        isApproved: approve,
-        workingBranchId: workingBranchId,
-      );
-      await _loadPendingStaff();
+      if (value) {
+        await _firebaseService.updateStaffApprovalStatus(
+          uid: employee.uid,
+          isApproved: true,
+          workingBranchId: employee.workingBranchId,
+        );
+      } else {
+        final service = EmployeeService(shopId: shopId);
+        await service.updateEmployee(employee.uid, {'isApproved': false});
+      }
+      await _loadEmployees();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              approve
-                  ? 'Đã phê duyệt nhân viên.'
-                  : 'Đã cập nhật trạng thái nhân viên.',
-            ),
+            content: Text(value ? 'Đã kích hoạt tài khoản.' : 'Đã vô hiệu hóa tài khoản.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -117,7 +121,7 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi khi cập nhật nhân viên: $e'),
+            content: Text('Lỗi cập nhật: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -125,17 +129,135 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
     }
   }
 
-  /// Hiển thị dialog để chọn chi nhánh khi phê duyệt nhân viên
+  Future<void> _approveStaffWithBranch(UserModel user, String workingBranchId, {String? groupId}) async {
+    try {
+      await _firebaseService.updateStaffApprovalStatus(
+        uid: user.uid,
+        isApproved: true,
+        workingBranchId: workingBranchId,
+        groupId: groupId,
+      );
+      await _loadEmployees();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã phê duyệt nhân viên.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi phê duyệt: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _changeGroup(UserModel user, String? groupId) async {
+    final shopId = context.read<AuthProvider>().shop?.id;
+    if (shopId == null) return;
+    try {
+      final service = EmployeeService(shopId: shopId);
+      await service.updateEmployee(user.uid, {'groupId': groupId});
+      await _loadEmployees();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã cập nhật nhóm nhân viên.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi cập nhật nhóm: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showChangeGroupDialog(UserModel user) async {
+    final groupProvider = context.read<EmployeeGroupProvider>();
+    String? selectedGroupId = user.groupId;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Chọn nhóm nhân viên'),
+              content: DropdownButtonFormField<String?>(
+                initialValue: selectedGroupId,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  labelText: 'Nhóm',
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('— Không nhóm')),
+                  ...groupProvider.employeeGroups
+                      .map((g) => DropdownMenuItem<String?>(value: g.id, child: Text(g.name))),
+                ],
+                onChanged: (v) => setState(() => selectedGroupId = v),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Hủy')),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    _changeGroup(user, selectedGroupId);
+                  },
+                  child: const Text('Lưu'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _changeBranch(UserModel user, String branchId) async {
+    try {
+      await _firebaseService.updateStaffWorkingBranch(
+        uid: user.uid,
+        workingBranchId: branchId,
+      );
+      await _loadEmployees();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã điều chuyển chi nhánh.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi điều chuyển: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _showApproveStaffDialog(UserModel user) async {
     final branchProvider = context.read<BranchProvider>();
-    
-    // Đảm bảo branches đã được load
-    if (branchProvider.branches.isEmpty) {
-      await branchProvider.loadBranches();
-    }
-
+    final groupProvider = context.read<EmployeeGroupProvider>();
+    if (branchProvider.branches.isEmpty) await branchProvider.loadBranches();
     final branches = branchProvider.branches.where((b) => b.isActive).toList();
-    
     if (branches.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -147,86 +269,62 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
       }
       return;
     }
-
     String? selectedBranchId = user.workingBranchId ?? branches.first.id;
-
+    String? selectedGroupId = user.groupId;
     if (!mounted) return;
-    
-    await showDialog(
+    await showDialog<void>(
       context: context,
-      builder: (BuildContext context) {
+      builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
               title: const Text('Phê duyệt nhân viên'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Email: ${user.email}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Chọn chi nhánh làm việc:',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedBranchId,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Chi nhánh',
-                      hintText: 'Chọn chi nhánh',
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Email: ${user.email}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    const Text('Chi nhánh làm việc:', style: TextStyle(fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedBranchId,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Chi nhánh',
+                      ),
+                      items: branches
+                          .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
+                          .toList(),
+                      onChanged: (v) => setState(() => selectedBranchId = v),
                     ),
-                    items: branches.map((branch) {
-                      return DropdownMenuItem<String>(
-                        value: branch.id,
-                        child: Row(
-                          children: [
-                            const Icon(Icons.store, size: 18),
-                            const SizedBox(width: 8),
-                            Text(branch.name),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (String? value) {
-                      if (value != null) {
-                        setState(() {
-                          selectedBranchId = value;
-                        });
-                      }
-                    },
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Vui lòng chọn chi nhánh';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Lưu ý: Nhân viên sẽ được gán vào chi nhánh này và có quyền truy cập dữ liệu của chi nhánh.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontStyle: FontStyle.italic,
+                    const SizedBox(height: 16),
+                    const Text('Nhóm nhân viên:', style: TextStyle(fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String?>(
+                      initialValue: selectedGroupId,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Nhóm',
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(value: null, child: Text('— Không nhóm')),
+                        ...groupProvider.employeeGroups
+                            .map((g) => DropdownMenuItem<String?>(value: g.id, child: Text(g.name))),
+                      ],
+                      onChanged: (v) => setState(() => selectedGroupId = v),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Hủy'),
-                ),
+                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Hủy')),
                 ElevatedButton(
                   onPressed: () {
                     if (selectedBranchId != null && selectedBranchId!.isNotEmpty) {
-                      Navigator.of(context).pop();
-                      _approveStaff(user, true, workingBranchId: selectedBranchId);
+                      Navigator.of(ctx).pop();
+                      _approveStaffWithBranch(user, selectedBranchId!, groupId: selectedGroupId);
                     }
                   },
                   child: const Text('Phê duyệt'),
@@ -239,17 +337,10 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
     );
   }
 
-  /// Hiển thị dialog để thay đổi chi nhánh làm việc của nhân viên
   Future<void> _showChangeBranchDialog(UserModel user) async {
     final branchProvider = context.read<BranchProvider>();
-    
-    // Đảm bảo branches đã được load
-    if (branchProvider.branches.isEmpty) {
-      await branchProvider.loadBranches();
-    }
-
+    if (branchProvider.branches.isEmpty) await branchProvider.loadBranches();
     final branches = branchProvider.branches.where((b) => b.isActive).toList();
-    
     if (branches.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -261,14 +352,11 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
       }
       return;
     }
-
     String? selectedBranchId = user.workingBranchId ?? branches.first.id;
-
     if (!mounted) return;
-    
-    await showDialog(
+    await showDialog<void>(
       context: context,
-      builder: (BuildContext context) {
+      builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
@@ -277,77 +365,30 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Nhân viên: ${user.displayName ?? user.email}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  Text('Nhân viên: ${user.displayName ?? user.email}', style: const TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
-                  const Text(
-                    'Chọn chi nhánh làm việc mới:',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
+                  const Text('Chọn chi nhánh làm việc mới:', style: TextStyle(fontWeight: FontWeight.w500)),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
                     initialValue: selectedBranchId,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       labelText: 'Chi nhánh',
-                      hintText: 'Chọn chi nhánh',
                     ),
-                    items: branches.map((branch) {
-                      return DropdownMenuItem<String>(
-                        value: branch.id,
-                        child: Row(
-                          children: [
-                            const Icon(Icons.store, size: 18),
-                            const SizedBox(width: 8),
-                            Text(branch.name),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (String? value) {
-                      if (value != null) {
-                        setState(() {
-                          selectedBranchId = value;
-                        });
-                      }
-                    },
+                    items: branches
+                        .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
+                        .toList(),
+                    onChanged: (v) => setState(() => selectedBranchId = v),
                   ),
                 ],
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Hủy'),
-                ),
+                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Hủy')),
                 ElevatedButton(
-                  onPressed: () async {
+                  onPressed: () {
                     if (selectedBranchId != null && selectedBranchId!.isNotEmpty) {
-                      Navigator.of(context).pop();
-                      final branchId = selectedBranchId!;
-                      try {
-                        await _firebaseService.updateStaffWorkingBranch(
-                          uid: user.uid,
-                          workingBranchId: branchId,
-                        );
-                        await _loadPendingStaff();
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Đã điều chuyển nhân viên sang chi nhánh: ${branches.firstWhere((b) => b.id == branchId).name}'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      } catch (e) {
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Lỗi khi điều chuyển nhân viên: $e'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                      }
+                      Navigator.of(ctx).pop();
+                      _changeBranch(user, selectedBranchId!);
                     }
                   },
                   child: const Text('Lưu'),
@@ -360,138 +401,55 @@ class _EmployeeManagementScreenState extends State<EmployeeManagementScreen> {
     );
   }
 
+  void _onAddEmployee() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Tính năng thêm nhân viên đang được phát triển.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Consumer<AuthProvider>(
-      builder: (context, authProvider, child) {
-        final shop = authProvider.shop;
-        // Dùng so sánh == true để an toàn ngay cả khi dữ liệu cũ có thể null
-        final bool allowRegistration = shop?.allowRegistration == true;
+    final authProvider = context.watch<AuthProvider>();
+    final branchProvider = context.watch<BranchProvider>();
+    final shop = authProvider.shop;
+    final allowRegistration = shop?.allowRegistration == true;
+    final branches = branchProvider.branches;
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Danh sách nhân viên'),
-          ),
-          body: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Card(
-                  child: SwitchListTile(
-                    title: const Text('Cho phép đăng ký nhân viên mới'),
-                    subtitle: Text(
-                      allowRegistration
-                          ? 'Nhân viên có thể tự đăng ký bằng Shop ID / QR Code.'
-                          : 'Tắt đăng ký nhân viên mới, chỉ Admin tạo tài khoản.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    value: allowRegistration,
-                    onChanged: (value) =>
-                        _toggleAllowRegistration(authProvider, value),
-                    secondary: Icon(
-                      allowRegistration ? Icons.check_circle : Icons.cancel,
-                      color:
-                          allowRegistration ? Colors.green : Colors.orange,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Nhân viên chờ phê duyệt',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: _isLoading
-                      ? const Center(
-                          child: CircularProgressIndicator(),
-                        )
-                      : _pendingStaff.isEmpty
-                          ? const Center(
-                              child: Text('Không có nhân viên chờ phê duyệt.'),
-                            )
-                          : RefreshIndicator(
-                              onRefresh: _loadPendingStaff,
-                              child: ListView.builder(
-                                itemCount: _pendingStaff.length,
-                                itemBuilder: (context, index) {
-                                  final staff = _pendingStaff[index];
-                                  return Card(
-                                    child: ListTile(
-                                      leading: const Icon(Icons.person),
-                                      title: Text(staff.email),
-                                      subtitle: Text(
-                                        'UID: ${staff.uid}\nNgày tạo: ${staff.createdAt}',
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                      isThreeLine: true,
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          // Hiển thị chi nhánh hiện tại nếu có
-                                          if (staff.workingBranchId != null)
-                                            Padding(
-                                              padding: const EdgeInsets.only(right: 8.0),
-                                              child: Consumer<BranchProvider>(
-                                                builder: (context, branchProvider, child) {
-                                                  final branch = branchProvider.branches
-                                                      .firstWhere(
-                                                        (b) => b.id == staff.workingBranchId,
-                                                        orElse: () => branchProvider.branches.first,
-                                                      );
-                                                  return Chip(
-                                                    avatar: const Icon(Icons.store, size: 16),
-                                                    label: Text(
-                                                      branch.name,
-                                                      style: const TextStyle(fontSize: 12),
-                                                    ),
-                                                    onDeleted: () => _showChangeBranchDialog(staff),
-                                                    deleteIcon: const Icon(Icons.edit, size: 16),
-                                                  );
-                                                },
-                                              ),
-                                            )
-                                          else
-                                            Padding(
-                                              padding: const EdgeInsets.only(right: 8.0),
-                                              child: Chip(
-                                                avatar: const Icon(Icons.store_outlined, size: 16),
-                                                label: const Text(
-                                                  'Chưa gán',
-                                                  style: TextStyle(fontSize: 12),
-                                                ),
-                                                backgroundColor: Colors.orange.shade50,
-                                              ),
-                                            ),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.check,
-                                              color: Colors.green,
-                                            ),
-                                            tooltip: 'Phê duyệt',
-                                            onPressed: () => _showApproveStaffDialog(staff),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    final groupProvider = context.watch<EmployeeGroupProvider>();
+    if (_useMobileLayout) {
+      return EmployeeManagementScreenMobile(
+        employees: _employees,
+        isLoading: _isLoading,
+        allowRegistration: allowRegistration,
+        branches: branches,
+        employeeGroups: groupProvider.employeeGroups,
+        getEmployeeGroupById: groupProvider.getEmployeeGroupById,
+        onRefresh: _loadEmployees,
+        onToggleAllowRegistration: (v) => _toggleAllowRegistration(authProvider, v),
+        onToggleApproval: _toggleApproval,
+        onApproveStaff: _showApproveStaffDialog,
+        onChangeBranch: _showChangeBranchDialog,
+        onChangeGroup: _showChangeGroupDialog,
+        onAdd: _onAddEmployee,
+      );
+    }
+    return EmployeeManagementScreenDesktop(
+      employees: _employees,
+      isLoading: _isLoading,
+      allowRegistration: allowRegistration,
+      branches: branches,
+      employeeGroups: groupProvider.employeeGroups,
+      getEmployeeGroupById: groupProvider.getEmployeeGroupById,
+      onRefresh: _loadEmployees,
+      onToggleAllowRegistration: (v) => _toggleAllowRegistration(authProvider, v),
+      onToggleApproval: _toggleApproval,
+      onApproveStaff: _showApproveStaffDialog,
+      onChangeBranch: _showChangeBranchDialog,
+      onChangeGroup: _showChangeGroupDialog,
+      onAdd: _onAddEmployee,
     );
   }
 }
-

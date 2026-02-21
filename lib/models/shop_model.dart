@@ -92,31 +92,62 @@ class PaymentConfig {
   }
 }
 
-/// Cấu hình hóa đơn điện tử FPT
+/// Nhà cung cấp hóa đơn điện tử: FPT, Viettel hoặc MISA
+enum EinvoiceProvider {
+  fpt('FPT'),
+  viettel('Viettel'),
+  misa('MISA');
+
+  final String label;
+  const EinvoiceProvider(this.label);
+
+  static EinvoiceProvider fromString(String value) {
+    return EinvoiceProvider.values.firstWhere(
+      (e) => e.name == value || e.label == value,
+      orElse: () => EinvoiceProvider.fpt,
+    );
+  }
+}
+
+/// Cấu hình hóa đơn điện tử (FPT, Viettel, MISA)
 class EinvoiceConfig {
+  final EinvoiceProvider provider;
   final String username;
   final String password;
-  final String baseUrl; // Môi trường Test: https://api-uat.einvoice.fpt.com.vn/create-icr
+  final String baseUrl;
+  /// Mẫu hóa đơn (Viettel: ví dụ 1/001; FPT không dùng; MISA: có thể dùng InvSeries)
+  final String? templateCode;
+  /// AppID do MISA cung cấp (bắt buộc khi provider = MISA)
+  final String? appId;
 
   EinvoiceConfig({
+    this.provider = EinvoiceProvider.fpt,
     required this.username,
     required this.password,
     required this.baseUrl,
+    this.templateCode,
+    this.appId,
   });
 
   factory EinvoiceConfig.fromMap(Map<String, dynamic> map) {
     return EinvoiceConfig(
+      provider: EinvoiceProvider.fromString(map['provider']?.toString() ?? 'fpt'),
       username: map['username'] ?? '',
       password: map['password'] ?? '',
       baseUrl: map['baseUrl'] ?? 'https://api-uat.einvoice.fpt.com.vn/create-icr',
+      templateCode: map['templateCode']?.toString(),
+      appId: map['appId']?.toString(),
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
+      'provider': provider.name,
       'username': username,
       'password': password,
       'baseUrl': baseUrl,
+      if (templateCode != null && templateCode!.isNotEmpty) 'templateCode': templateCode,
+      if (appId != null && appId!.isNotEmpty) 'appId': appId,
     };
   }
 }
@@ -128,6 +159,8 @@ class ShopModel {
   final String? address;
   final String? phone;
   final String? email;
+  final String? website;
+  final String? logoUrl;
   final String? taxCode;
   
   // Thông tin hóa đơn điện tử FPT
@@ -149,11 +182,37 @@ class ShopModel {
   // Cấu hình đăng ký nhân viên
   final bool allowRegistration; // Cho phép nhân viên đăng ký (mặc định false)
   
+  // Feature flag & cấu hình đồng bộ KiotViet (chỉ hiển thị khi isKiotVietEnabled = true)
+  final bool isKiotVietEnabled; // Biến điều khiển từ Admin (mặc định false)
+  final bool syncWithKiotViet; // Toggle cho phép người dùng bật/tắt đồng bộ (mặc định false)
+  final String? kiotClientId; // Client ID của KiotViet
+  final String? kiotClientSecret; // Client Secret của KiotViet
+  
   // Cấu hình cập nhật tồn kho
   final bool allowQuickStockUpdate; // Cho phép cập nhật nhanh tồn kho tại danh sách (mặc định true)
   
+  /// Khi bật: không trừ kho khi thanh toán, chỉ trừ kho khi phát hành hóa đơn điện tử (mặc định false)
+  final bool deductStockOnEinvoiceOnly;
+  
   /// Thuế VAT (%) áp dụng cho hóa đơn bán hàng (0 = không thuế)
   final double vatRate;
+
+  /// Cấu hình máy in: khổ giấy mặc định (58 hoặc 80 mm)
+  final int printerPaperSizeMm;
+  /// Tự động in hóa đơn sau khi thanh toán xong
+  final bool autoPrintAfterPayment;
+  /// Tên máy in (Desktop) để Silent Print đúng thiết bị
+  final String? printerName;
+
+  /// Tùy chỉnh nội dung hóa đơn: lời chào/cảm ơn (cuối hóa đơn)
+  final String? invoiceThankYouMessage;
+  /// Chính sách đổi trả (in ở dưới cùng hóa đơn)
+  final String? invoiceReturnPolicy;
+  /// VietQR: mã BIN ngân hàng (6 số), tên ngân hàng, số TK, tên chủ tài khoản
+  final String? vietqrBankBin;
+  final String? vietqrBankName;
+  final String? vietqrAccountNumber;
+  final String? vietqrAccountName;
 
   // Các trường khác có thể có
   final DateTime? createdAt;
@@ -167,6 +226,8 @@ class ShopModel {
     this.address,
     this.phone,
     this.email,
+    this.website,
+    this.logoUrl,
     this.taxCode,
     this.stax,
     this.serial,
@@ -177,8 +238,22 @@ class ShopModel {
     this.allowNegativeStock = false,
     this.enableCostPrice = true,
     this.allowRegistration = false,
+    this.isKiotVietEnabled = false,
+    this.syncWithKiotViet = false,
+    this.kiotClientId,
+    this.kiotClientSecret,
     this.allowQuickStockUpdate = true,
+    this.deductStockOnEinvoiceOnly = false,
     this.vatRate = 0.0,
+    this.printerPaperSizeMm = 80,
+    this.autoPrintAfterPayment = false,
+    this.printerName,
+    this.invoiceThankYouMessage,
+    this.invoiceReturnPolicy,
+    this.vietqrBankBin,
+    this.vietqrBankName,
+    this.vietqrAccountNumber,
+    this.vietqrAccountName,
     this.createdAt,
     this.updatedAt,
     this.settings,
@@ -207,6 +282,8 @@ class ShopModel {
       address: data['address'],
       phone: data['phone'],
       email: data['email'],
+      website: data['website']?.toString(),
+      logoUrl: data['logoUrl']?.toString(),
       taxCode: data['taxCode'],
       stax: data['stax'],
       serial: data['serial'],
@@ -223,8 +300,22 @@ class ShopModel {
       allowNegativeStock: data['allowNegativeStock'] ?? false,
       enableCostPrice: data['enableCostPrice'] ?? true,
       allowRegistration: data['allowRegistration'] ?? false,
+      isKiotVietEnabled: data['isKiotVietEnabled'] ?? false,
+      syncWithKiotViet: data['syncWithKiotViet'] ?? false,
+      kiotClientId: data['kiotClientId']?.toString(),
+      kiotClientSecret: data['kiotClientSecret']?.toString(),
       allowQuickStockUpdate: data['allowQuickStockUpdate'] ?? true,
+      deductStockOnEinvoiceOnly: data['deductStockOnEinvoiceOnly'] ?? false,
       vatRate: (data['vatRate'] as num?)?.toDouble() ?? 0.0,
+      printerPaperSizeMm: (data['printerPaperSizeMm'] as num?)?.toInt() ?? 80,
+      autoPrintAfterPayment: data['autoPrintAfterPayment'] ?? false,
+      printerName: data['printerName']?.toString(),
+      invoiceThankYouMessage: data['invoiceThankYouMessage']?.toString(),
+      invoiceReturnPolicy: data['invoiceReturnPolicy']?.toString(),
+      vietqrBankBin: data['vietqrBankBin']?.toString(),
+      vietqrBankName: data['vietqrBankName']?.toString(),
+      vietqrAccountNumber: data['vietqrAccountNumber']?.toString(),
+      vietqrAccountName: data['vietqrAccountName']?.toString(),
       settings: data['settings'] != null
           ? Map<String, dynamic>.from(data['settings'])
           : null,
@@ -240,6 +331,8 @@ class ShopModel {
       address: json['address'],
       phone: json['phone'],
       email: json['email'],
+      website: json['website']?.toString(),
+      logoUrl: json['logoUrl']?.toString(),
       taxCode: json['taxCode'],
       stax: json['stax'],
       serial: json['serial'],
@@ -262,8 +355,22 @@ class ShopModel {
       allowNegativeStock: json['allowNegativeStock'] ?? false,
       enableCostPrice: json['enableCostPrice'] ?? true,
       allowRegistration: json['allowRegistration'] ?? false,
+      isKiotVietEnabled: json['isKiotVietEnabled'] ?? false,
+      syncWithKiotViet: json['syncWithKiotViet'] ?? false,
+      kiotClientId: json['kiotClientId']?.toString(),
+      kiotClientSecret: json['kiotClientSecret']?.toString(),
       allowQuickStockUpdate: json['allowQuickStockUpdate'] ?? true,
+      deductStockOnEinvoiceOnly: json['deductStockOnEinvoiceOnly'] ?? false,
       vatRate: (json['vatRate'] as num?)?.toDouble() ?? 0.0,
+      printerPaperSizeMm: (json['printerPaperSizeMm'] as num?)?.toInt() ?? 80,
+      autoPrintAfterPayment: json['autoPrintAfterPayment'] ?? false,
+      printerName: json['printerName']?.toString(),
+      invoiceThankYouMessage: json['invoiceThankYouMessage']?.toString(),
+      invoiceReturnPolicy: json['invoiceReturnPolicy']?.toString(),
+      vietqrBankBin: json['vietqrBankBin']?.toString(),
+      vietqrBankName: json['vietqrBankName']?.toString(),
+      vietqrAccountNumber: json['vietqrAccountNumber']?.toString(),
+      vietqrAccountName: json['vietqrAccountName']?.toString(),
       settings: json['settings'] != null
           ? Map<String, dynamic>.from(json['settings'])
           : null,
@@ -279,6 +386,8 @@ class ShopModel {
       'address': address,
       'phone': phone,
       'email': email,
+      'website': website,
+      'logoUrl': logoUrl,
       'taxCode': taxCode,
       'stax': stax,
       'serial': serial,
@@ -289,8 +398,22 @@ class ShopModel {
       'allowNegativeStock': allowNegativeStock,
       'enableCostPrice': enableCostPrice,
       'allowRegistration': allowRegistration,
+      'isKiotVietEnabled': isKiotVietEnabled,
+      'syncWithKiotViet': syncWithKiotViet,
+      'kiotClientId': kiotClientId,
+      'kiotClientSecret': kiotClientSecret,
       'allowQuickStockUpdate': allowQuickStockUpdate,
+      'deductStockOnEinvoiceOnly': deductStockOnEinvoiceOnly,
       'vatRate': vatRate,
+      'printerPaperSizeMm': printerPaperSizeMm,
+      'autoPrintAfterPayment': autoPrintAfterPayment,
+      'printerName': printerName,
+      'invoiceThankYouMessage': invoiceThankYouMessage,
+      'invoiceReturnPolicy': invoiceReturnPolicy,
+      'vietqrBankBin': vietqrBankBin,
+      'vietqrBankName': vietqrBankName,
+      'vietqrAccountNumber': vietqrAccountNumber,
+      'vietqrAccountName': vietqrAccountName,
       'createdAt': createdAt?.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'settings': settings,
@@ -305,6 +428,8 @@ class ShopModel {
       'address': address,
       'phone': phone,
       'email': email,
+      'website': website,
+      'logoUrl': logoUrl,
       'taxCode': taxCode,
       'stax': stax,
       'serial': serial,
@@ -317,8 +442,22 @@ class ShopModel {
       'allowNegativeStock': allowNegativeStock,
       'enableCostPrice': enableCostPrice,
       'allowRegistration': allowRegistration,
+      'isKiotVietEnabled': isKiotVietEnabled,
+      'syncWithKiotViet': syncWithKiotViet,
+      'kiotClientId': kiotClientId,
+      'kiotClientSecret': kiotClientSecret,
       'allowQuickStockUpdate': allowQuickStockUpdate,
+      'deductStockOnEinvoiceOnly': deductStockOnEinvoiceOnly,
       'vatRate': vatRate,
+      'printerPaperSizeMm': printerPaperSizeMm,
+      'autoPrintAfterPayment': autoPrintAfterPayment,
+      'printerName': printerName,
+      'invoiceThankYouMessage': invoiceThankYouMessage,
+      'invoiceReturnPolicy': invoiceReturnPolicy,
+      'vietqrBankBin': vietqrBankBin,
+      'vietqrBankName': vietqrBankName,
+      'vietqrAccountNumber': vietqrAccountNumber,
+      'vietqrAccountName': vietqrAccountName,
       'createdAt': createdAt != null
           ? Timestamp.fromDate(createdAt!)
           : null,
@@ -346,6 +485,8 @@ class ShopModel {
     String? address,
     String? phone,
     String? email,
+    String? website,
+    String? logoUrl,
     String? taxCode,
     String? stax,
     String? serial,
@@ -356,8 +497,22 @@ class ShopModel {
     bool? allowNegativeStock,
     bool? enableCostPrice,
     bool? allowRegistration,
+    bool? isKiotVietEnabled,
+    bool? syncWithKiotViet,
+    String? kiotClientId,
+    String? kiotClientSecret,
     bool? allowQuickStockUpdate,
+    bool? deductStockOnEinvoiceOnly,
     double? vatRate,
+    int? printerPaperSizeMm,
+    bool? autoPrintAfterPayment,
+    String? printerName,
+    String? invoiceThankYouMessage,
+    String? invoiceReturnPolicy,
+    String? vietqrBankBin,
+    String? vietqrBankName,
+    String? vietqrAccountNumber,
+    String? vietqrAccountName,
     DateTime? createdAt,
     DateTime? updatedAt,
     Map<String, dynamic>? settings,
@@ -369,6 +524,8 @@ class ShopModel {
       address: address ?? this.address,
       phone: phone ?? this.phone,
       email: email ?? this.email,
+      website: website ?? this.website,
+      logoUrl: logoUrl ?? this.logoUrl,
       taxCode: taxCode ?? this.taxCode,
       stax: stax ?? this.stax,
       serial: serial ?? this.serial,
@@ -379,8 +536,22 @@ class ShopModel {
       allowNegativeStock: allowNegativeStock ?? this.allowNegativeStock,
       enableCostPrice: enableCostPrice ?? this.enableCostPrice,
       allowRegistration: allowRegistration ?? this.allowRegistration,
+      isKiotVietEnabled: isKiotVietEnabled ?? this.isKiotVietEnabled,
+      syncWithKiotViet: syncWithKiotViet ?? this.syncWithKiotViet,
+      kiotClientId: kiotClientId ?? this.kiotClientId,
+      kiotClientSecret: kiotClientSecret ?? this.kiotClientSecret,
       allowQuickStockUpdate: allowQuickStockUpdate ?? this.allowQuickStockUpdate,
+      deductStockOnEinvoiceOnly: deductStockOnEinvoiceOnly ?? this.deductStockOnEinvoiceOnly,
       vatRate: vatRate ?? this.vatRate,
+      printerPaperSizeMm: printerPaperSizeMm ?? this.printerPaperSizeMm,
+      autoPrintAfterPayment: autoPrintAfterPayment ?? this.autoPrintAfterPayment,
+      printerName: printerName ?? this.printerName,
+      invoiceThankYouMessage: invoiceThankYouMessage ?? this.invoiceThankYouMessage,
+      invoiceReturnPolicy: invoiceReturnPolicy ?? this.invoiceReturnPolicy,
+      vietqrBankBin: vietqrBankBin ?? this.vietqrBankBin,
+      vietqrBankName: vietqrBankName ?? this.vietqrBankName,
+      vietqrAccountNumber: vietqrAccountNumber ?? this.vietqrAccountNumber,
+      vietqrAccountName: vietqrAccountName ?? this.vietqrAccountName,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       settings: settings ?? this.settings,

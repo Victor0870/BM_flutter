@@ -4,6 +4,7 @@ import '../models/purchase_model.dart';
 import '../models/branch_model.dart';
 import 'local_db_service.dart';
 import 'product_service.dart';
+import 'notification_service.dart';
 
 /// Hybrid Purchase Service - Quản lý phiếu nhập kho với logic hybrid (Offline-First)
 /// - Gói BASIC: Chỉ lưu vào SQLite
@@ -87,6 +88,22 @@ class PurchaseService {
 
       if (kDebugMode) {
         debugPrint('✅ Purchase saved successfully: ${purchase.id}');
+      }
+
+      // 3. Thông báo phiếu nhập kho hoàn thành
+      if (purchase.status == 'COMPLETED') {
+        try {
+          await NotificationService.notifyPurchaseCompleted(
+            shopId: userId,
+            purchaseId: purchase.id,
+            supplierName: purchase.supplierName,
+            totalAmount: purchase.totalAmount,
+          );
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Notification create failed (purchase completed): $e');
+          }
+        }
       }
 
       return purchase.id;

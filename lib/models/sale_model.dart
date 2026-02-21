@@ -1,19 +1,51 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Enum cho phương thức thanh toán
+/// Enum cho phương thức thanh toán (tương thích KiotViet: Tiền mặt, Thẻ, Chuyển khoản)
 enum PaymentMethodType {
   cash('CASH'),
+  card('CARD'),
   transfer('TRANSFER');
 
   final String value;
   const PaymentMethodType(this.value);
+
+  /// Nhãn hiển thị theo KiotViet
+  String get displayName {
+    switch (this) {
+      case PaymentMethodType.cash:
+        return 'Tiền mặt';
+      case PaymentMethodType.card:
+        return 'Thẻ';
+      case PaymentMethodType.transfer:
+        return 'Chuyển khoản';
+    }
+  }
 
   static PaymentMethodType fromString(String value) {
     return PaymentMethodType.values.firstWhere(
       (e) => e.value == value,
       orElse: () => PaymentMethodType.cash,
     );
+  }
+}
+
+/// Trạng thái đơn hàng (tương thích KiotViet: Đã giao, Đang xử lý, Đã hủy)
+const String kOrderStatusDelivered = 'Delivered';
+const String kOrderStatusProcessing = 'Processing';
+const String kOrderStatusCancelled = 'Cancelled';
+
+String orderStatusDisplayName(String? statusValue) {
+  if (statusValue == null || statusValue.isEmpty) return '—';
+  switch (statusValue) {
+    case kOrderStatusDelivered:
+      return 'Đã giao';
+    case kOrderStatusProcessing:
+      return 'Đang xử lý';
+    case kOrderStatusCancelled:
+      return 'Đã hủy';
+    default:
+      return statusValue;
   }
 }
 
@@ -46,9 +78,10 @@ class SaleModel {
   final String? customerAddress; // Địa chỉ khách hàng
   final String? customerId; // ID của CustomerModel (nếu có)
   final String? notes;
-  final String userId; // ID của shop/user tạo đơn hàng
+  final String userId; // ID của shop (chủ) tạo đơn hàng
   final String branchId; // ID của chi nhánh thực hiện bán hàng (bắt buộc)
-  final String? sellerId; // ID của nhân viên bán hàng (seller)
+  /// ID nhân viên thực hiện đơn (staffId) — trùng với sellerId khi lưu Firestore
+  final String? sellerId;
   final String? sellerName; // Tên nhân viên bán hàng
   final bool isStockUpdated; // Flag để kiểm soát việc trừ kho, tránh trừ kho 2 lần
   final double? totalBeforeDiscount; // Tổng tiền hàng trước chiết khấu (deprecated, dùng subTotal)
@@ -70,6 +103,13 @@ class SaleModel {
   final String? templateCode; // Mẫu số hóa đơn
   final String? invoiceSerial; // Ký hiệu hóa đơn
   final String? einvoiceUrl; // Link tra cứu/xem hóa đơn điện tử
+
+  // KiotViet-compatible: 2.5 Đặt hàng, 2.12 Hóa đơn
+  /// Số tiền khách thanh toán (totalPayment) — có thể khác totalAmount khi thanh toán từng phần
+  final double? totalPayment;
+  /// Trạng thái đơn hàng (statusValue): Delivered, Processing, Cancelled
+  final String? statusValue;
+  /// Phương thức thanh toán hiển thị (method): CASH/CARD/TRANSFER — trùng paymentMethod, dùng cho đồng bộ KiotViet
 
   SaleModel({
     required this.id,
@@ -101,6 +141,8 @@ class SaleModel {
     this.templateCode, // Mẫu số hóa đơn
     this.invoiceSerial, // Ký hiệu hóa đơn
     this.einvoiceUrl, // Link tra cứu hóa đơn điện tử
+    this.totalPayment, // Khách thanh toán (KiotViet)
+    this.statusValue, // Trạng thái đơn: Delivered, Processing, Cancelled
   });
 
   /// Tạo SaleModel từ Firestore document
@@ -138,6 +180,8 @@ class SaleModel {
       templateCode: data['templateCode'] as String?,
       invoiceSerial: data['invoiceSerial'] as String?,
       einvoiceUrl: data['einvoiceUrl'] as String?,
+      totalPayment: data['totalPayment'] != null ? (data['totalPayment'] as num).toDouble() : null,
+      statusValue: data['statusValue'] as String?,
     );
   }
 
@@ -176,6 +220,8 @@ class SaleModel {
       templateCode: json['templateCode'] as String?,
       invoiceSerial: json['invoiceSerial'] as String?,
       einvoiceUrl: json['einvoiceUrl'] as String?,
+      totalPayment: json['totalPayment'] != null ? (json['totalPayment'] as num).toDouble() : null,
+      statusValue: json['statusValue'] as String?,
     );
   }
 
@@ -213,6 +259,8 @@ class SaleModel {
       templateCode: map['templateCode'] as String?,
       invoiceSerial: map['invoiceSerial'] as String?,
       einvoiceUrl: map['einvoiceUrl'] as String?,
+      totalPayment: map['totalPayment'] != null ? (map['totalPayment'] as num).toDouble() : null,
+      statusValue: map['statusValue'] as String?,
     );
   }
 
@@ -244,6 +292,8 @@ class SaleModel {
       'discountApprovedBy': discountApprovedBy,
       'vatRate': vatRate,
       'taxAmount': taxAmount,
+      'totalPayment': totalPayment,
+      'statusValue': statusValue,
     };
   }
 
@@ -278,6 +328,8 @@ class SaleModel {
       'templateCode': templateCode,
       'invoiceSerial': invoiceSerial,
       'einvoiceUrl': einvoiceUrl,
+      'totalPayment': totalPayment,
+      'statusValue': statusValue,
       'createdAt': Timestamp.now(), // Thời điểm tạo hóa đơn
     };
   }
@@ -313,6 +365,8 @@ class SaleModel {
       'templateCode': templateCode,
       'invoiceSerial': invoiceSerial,
       'einvoiceUrl': einvoiceUrl,
+      'totalPayment': totalPayment,
+      'statusValue': statusValue,
     };
   }
 
@@ -347,6 +401,8 @@ class SaleModel {
     String? templateCode,
     String? invoiceSerial,
     String? einvoiceUrl,
+    double? totalPayment,
+    String? statusValue,
   }) {
     return SaleModel(
       id: id ?? this.id,
@@ -378,6 +434,8 @@ class SaleModel {
       templateCode: templateCode ?? this.templateCode,
       invoiceSerial: invoiceSerial ?? this.invoiceSerial,
       einvoiceUrl: einvoiceUrl ?? this.einvoiceUrl,
+      totalPayment: totalPayment ?? this.totalPayment,
+      statusValue: statusValue ?? this.statusValue,
     );
   }
 }
@@ -391,6 +449,12 @@ class SaleItem {
   final double vatRate; // Thuế suất VAT (%)
   final double? discount; // Giá trị chiết khấu (có thể là % hoặc số tiền)
   final bool? isDiscountPercentage; // true nếu discount là %, false nếu là số tiền
+  /// Ghi chú dòng hàng (KiotViet-compatible)
+  final String? notes;
+  /// Lô hàng đã bán (KiotViet 2.12.1 — Batch & Expire). Dùng cho Dược, Thực phẩm.
+  final String? batchName;
+  /// Hạn sử dụng lô hàng đã bán (invoiceDetails).
+  final DateTime? expireDate;
 
   SaleItem({
     required this.productId,
@@ -400,6 +464,9 @@ class SaleItem {
     this.vatRate = 10.0, // Mặc định 10%
     this.discount,
     this.isDiscountPercentage,
+    this.notes,
+    this.batchName,
+    this.expireDate,
   });
 
   /// Tính subtotal sau khi áp dụng chiết khấu
@@ -442,6 +509,14 @@ class SaleItem {
 
   /// Tạo SaleItem từ Map
   factory SaleItem.fromMap(Map<String, dynamic> map) {
+    DateTime? exp;
+    if (map['expireDate'] != null) {
+      if (map['expireDate'] is DateTime) {
+        exp = map['expireDate'] as DateTime;
+      } else {
+        exp = DateTime.tryParse(map['expireDate'].toString());
+      }
+    }
     return SaleItem(
       productId: map['productId'] ?? '',
       productName: map['productName'] ?? '',
@@ -450,6 +525,9 @@ class SaleItem {
       vatRate: (map['vatRate'] ?? 10.0).toDouble(),
       discount: map['discount'] != null ? (map['discount'] as num).toDouble() : null,
       isDiscountPercentage: map['isDiscountPercentage'] as bool?,
+      notes: map['notes'] as String?,
+      batchName: map['batchName'] as String?,
+      expireDate: exp,
     );
   }
 
@@ -477,6 +555,9 @@ class SaleItem {
       'vatRate': vatRate,
       'discount': discount,
       'isDiscountPercentage': isDiscountPercentage,
+      'notes': notes,
+      'batchName': batchName,
+      'expireDate': expireDate?.toIso8601String(),
     };
   }
 
@@ -489,6 +570,9 @@ class SaleItem {
     double? vatRate,
     double? discount,
     bool? isDiscountPercentage,
+    String? notes,
+    String? batchName,
+    DateTime? expireDate,
   }) {
     return SaleItem(
       productId: productId ?? this.productId,
@@ -498,6 +582,9 @@ class SaleItem {
       vatRate: vatRate ?? this.vatRate,
       discount: discount ?? this.discount,
       isDiscountPercentage: isDiscountPercentage ?? this.isDiscountPercentage,
+      notes: notes ?? this.notes,
+      batchName: batchName ?? this.batchName,
+      expireDate: expireDate ?? this.expireDate,
     );
   }
 }

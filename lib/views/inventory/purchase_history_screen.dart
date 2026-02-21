@@ -11,8 +11,14 @@ import '../../utils/platform_utils.dart';
 class PurchaseHistoryScreen extends StatefulWidget {
   /// Nếu null: dùng [isMobilePlatform]. Hiện chưa có layout khác biệt.
   final bool? forceMobile;
+  /// Khi set (vd. từ thông báo), sau khi load xong sẽ mở dialog chi tiết phiếu này.
+  final String? highlightPurchaseId;
 
-  const PurchaseHistoryScreen({super.key, this.forceMobile});
+  const PurchaseHistoryScreen({
+    super.key,
+    this.forceMobile,
+    this.highlightPurchaseId,
+  });
 
   @override
   State<PurchaseHistoryScreen> createState() => _PurchaseHistoryScreenState();
@@ -57,6 +63,22 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
         _purchases = purchases;
         _isLoading = false;
       });
+      final highlightId = widget.highlightPurchaseId;
+      if (mounted && highlightId != null && highlightId.isNotEmpty) {
+        PurchaseModel? toShow;
+        for (final p in purchases) {
+          if (p.id == highlightId) {
+            toShow = p;
+            break;
+          }
+        }
+        if (toShow != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _showPurchaseDetail(toShow!);
+          });
+        }
+      }
     } catch (e) {
       setState(() {
         _isLoading = false;

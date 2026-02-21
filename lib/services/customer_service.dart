@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/customer_model.dart';
 import '../models/customer_group_model.dart';
 import 'local_db_service.dart';
@@ -30,21 +31,18 @@ class CustomerService {
 
   // ==================== CUSTOMER GROUPS ====================
 
-  /// Lấy tất cả nhóm khách hàng
-  /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase.
-  /// PRO + không web: nếu SQLite trống thì đồng bộ từ Firestore (dữ liệu mẫu sau đăng ký).
+  /// Lấy tất cả nhóm khách hàng.
+  /// - Web: luôn đọc từ Firestore.
+  /// - PRO (app): mỗi lần load đồng bộ từ Firestore xuống SQLite rồi trả về (đồng bộ đa thiết bị).
+  /// - BASIC: chỉ đọc từ SQLite.
   Future<List<CustomerGroupModel>> getCustomerGroups() async {
     if (kIsWeb) {
       return await _getCustomerGroupsFromFirestore();
     }
 
     if (isPro) {
-      final local = await _localDb.getCustomerGroups();
-      if (local.isEmpty) {
-        await _syncCustomerGroupsFromFirestoreToLocal();
-        return await _localDb.getCustomerGroups();
-      }
-      return local;
+      await _syncCustomerGroupsFromFirestoreToLocal();
+      return await _localDb.getCustomerGroups();
     }
     return await _localDb.getCustomerGroups();
   }
@@ -245,18 +243,18 @@ class CustomerService {
   /// Lấy tất cả khách hàng
   /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase.
   /// PRO + không web: nếu SQLite trống thì đồng bộ từ Firestore (dữ liệu mẫu sau đăng ký).
+  /// Lấy danh sách khách hàng.
+  /// - Web: luôn đọc từ Firestore (đồng bộ đa thiết bị).
+  /// - PRO (app): mỗi lần load đều kéo Firestore về SQLite rồi trả về (đồng bộ khi đăng nhập máy khác / mobile).
+  /// - BASIC: chỉ đọc từ SQLite.
   Future<List<CustomerModel>> getCustomers() async {
     if (kIsWeb) {
       return await _getCustomersFromFirestore();
     }
 
     if (isPro) {
-      final local = await _localDb.getCustomers();
-      if (local.isEmpty) {
-        await _syncCustomersFromFirestoreToLocal();
-        return await _localDb.getCustomers();
-      }
-      return local;
+      await _syncCustomersFromFirestoreToLocal();
+      return await _localDb.getCustomers();
     }
     return await _localDb.getCustomers();
   }
@@ -301,20 +299,84 @@ class CustomerService {
     }
   }
 
-  /// Đồng bộ khách hàng từ Firestore xuống SQLite (PRO, lần đầu sau đăng ký).
-  /// Đồng bộ nhóm khách hàng trước để getCustomerGroupById hoạt động khi áp dụng chiết khấu.
-  Future<void> _syncCustomersFromFirestoreToLocal() async {
+  static const String _keyLastSyncCustomers = 'last_sync_customers';
+
+  /// Đồng bộ tăng dần: chỉ lấy customer có updatedAt > lastSync, merge vào SQLite. Giảm lượt đọc.
+  Future<void> syncIncrementalFromCloud() async {
+    if (kIsWeb || !isPro) return;
     try {
-      await _syncCustomerGroupsFromFirestoreToLocal();
-      final snapshot = await _customersCollection.get();
-      final customers = snapshot.docs
-          .map((doc) => CustomerModel.fromFirestore(doc.data(), doc.id))
-          .toList();
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_keyLastSyncCustomers}_$userId';
+      final lastMs = prefs.getInt(key);
+
+      final List<CustomerModel> customers;
+      if (lastMs == null) {
+        final snapshot = await _customersCollection.get();
+        customers = snapshot.docs
+            .map((doc) => CustomerModel.fromFirestore(doc.data(), doc.id))
+            .toList();
+      } else {
+        final lastSync = DateTime.fromMillisecondsSinceEpoch(lastMs);
+        final snapshot = await _customersCollection
+            .where('updatedAt', isGreaterThan: Timestamp.fromDate(lastSync))
+            .orderBy('updatedAt')
+            .get();
+        customers = snapshot.docs
+            .map((doc) => CustomerModel.fromFirestore(doc.data(), doc.id))
+            .toList();
+      }
+
       for (final c in customers) {
         await _localDb.addCustomer(c);
       }
+      await prefs.setInt(key, DateTime.now().millisecondsSinceEpoch);
       if (kDebugMode && customers.isNotEmpty) {
-        debugPrint('✅ Synced ${customers.length} customers from Firestore to SQLite');
+        debugPrint('✅ Incremental sync customers: ${customers.length} docs');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ syncIncrementalFromCloud (customers): $e');
+    }
+  }
+
+  /// Đồng bộ khách hàng từ Firestore xuống SQLite (PRO).
+  /// Dùng incremental nếu đã có lastSync; lần đầu dùng full sync.
+  Future<void> _syncCustomersFromFirestoreToLocal() async {
+    try {
+      await _syncCustomerGroupsFromFirestoreToLocal();
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_keyLastSyncCustomers}_$userId';
+      final lastMs = prefs.getInt(key);
+      final lastSync = lastMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(lastMs)
+          : null;
+
+      if (lastSync == null) {
+        final snapshot = await _customersCollection.get();
+        final customers = snapshot.docs
+            .map((doc) => CustomerModel.fromFirestore(doc.data(), doc.id))
+            .toList();
+        for (final c in customers) {
+          await _localDb.addCustomer(c);
+        }
+        await prefs.setInt(key, DateTime.now().millisecondsSinceEpoch);
+        if (kDebugMode && customers.isNotEmpty) {
+          debugPrint('✅ Synced ${customers.length} customers from Firestore to SQLite (full)');
+        }
+      } else {
+        final query = _customersCollection
+            .where('updatedAt', isGreaterThan: Timestamp.fromDate(lastSync))
+            .orderBy('updatedAt');
+        final snapshot = await query.get();
+        final customers = snapshot.docs
+            .map((doc) => CustomerModel.fromFirestore(doc.data(), doc.id))
+            .toList();
+        for (final c in customers) {
+          await _localDb.addCustomer(c);
+        }
+        await prefs.setInt(key, DateTime.now().millisecondsSinceEpoch);
+        if (kDebugMode && customers.isNotEmpty) {
+          debugPrint('✅ Synced ${customers.length} customers (incremental)');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
@@ -401,6 +463,36 @@ class CustomerService {
         debugPrint('Error adding customer to Firestore: $e');
       }
       rethrow;
+    }
+  }
+
+  /// Giới hạn 500 thao tác/batch theo Firestore.
+  static const int _firestoreBatchLimit = 500;
+
+  /// Thêm hàng loạt khách hàng: SQLite batch + Firestore WriteBatch (tối đa 500/batch).
+  Future<void> addCustomersBatch(List<CustomerModel> customers, {void Function(double)? onProgress}) async {
+    if (customers.isEmpty) return;
+
+    final doFirestore = kIsWeb || isPro;
+    if (!kIsWeb) {
+      await _localDb.addCustomersBatch(customers);
+      if (onProgress != null && !doFirestore) onProgress(1.0);
+    }
+
+    if (doFirestore) {
+      final total = customers.length;
+      var done = 0;
+      for (var start = 0; start < total; start += _firestoreBatchLimit) {
+        final end = (start + _firestoreBatchLimit < total) ? start + _firestoreBatchLimit : total;
+        final batch = _firestore.batch();
+        for (var i = start; i < end; i++) {
+          final c = customers[i];
+          batch.set(_customersCollection.doc(c.id), c.toFirestore());
+        }
+        await batch.commit();
+        done = end;
+        if (onProgress != null) onProgress(done / total);
+      }
     }
   }
 

@@ -11,7 +11,6 @@ import '../../models/branch_model.dart';
 import '../../models/unit_conversion.dart';
 import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
-import '../../widgets/ad_banner_widget.dart';
 
 /// Màn hình nhập kho (mobile/desktop theo platform).
 class PurchaseScreen extends StatefulWidget {
@@ -651,10 +650,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         ],
         ),
         ),
-      ),
-      const SafeArea(
-        top: false,
-        child: AdBannerWidget(),
       ),
       ],
       ),

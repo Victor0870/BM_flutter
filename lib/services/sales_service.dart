@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
 import '../models/sale_model.dart';
+import '../models/profit_report_model.dart';
 import 'local_db_service.dart';
 import 'product_service.dart';
 import 'customer_service.dart';
+import 'notification_service.dart';
 
 /// Hybrid Sales Service - Quản lý đơn hàng với logic hybrid (Offline-First)
 /// - Gói BASIC: Chỉ lưu vào SQLite
@@ -31,9 +33,11 @@ class SalesService {
   /// PRO: Lưu song song SQLite + Firestore, cập nhật stock cả 2
   /// BASIC: Chỉ lưu SQLite, cập nhật stock SQLite
   /// Nếu đơn hàng là "nợ" (paymentMethod = 'DEBT'), sẽ cập nhật totalDebt của khách hàng
+  /// [skipStockUpdate] Khi true: không trừ kho (dùng khi deductStockOnEinvoiceOnly - chỉ trừ khi phát hành HĐĐT)
   Future<String> saveSale(
     SaleModel sale, {
     CustomerService? customerService,
+    bool skipStockUpdate = false,
   }) async {
     try {
       if (kDebugMode) {
@@ -42,8 +46,8 @@ class SalesService {
 
       // 1. Cập nhật stock cho tất cả sản phẩm trong đơn hàng TRƯỚC
       // Quan trọng: Phải cập nhật stock trước khi lưu sale
-      // NHƯNG: Chỉ cập nhật stock nếu paymentStatus = COMPLETED
-      if (sale.paymentStatus == 'COMPLETED') {
+      // NHƯNG: Chỉ cập nhật stock nếu paymentStatus = COMPLETED và không skipStockUpdate
+      if (sale.paymentStatus == 'COMPLETED' && !skipStockUpdate) {
         if (kDebugMode) {
           debugPrint('📦 Step 1: Updating product stocks...');
         }
@@ -135,6 +139,21 @@ class SalesService {
           // Log lỗi nhưng không chặn quá trình lưu đơn hàng
           if (kDebugMode) {
             debugPrint('⚠️ Error updating customer debt: $e');
+          }
+        }
+      }
+
+      // 4. Thông báo đơn hàng hoàn thành (chỉ khi đã thanh toán xong)
+      if (sale.paymentStatus == 'COMPLETED') {
+        try {
+          await NotificationService.notifySaleCompleted(
+            shopId: userId,
+            saleId: sale.id,
+            totalAmount: sale.totalAmount,
+          );
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Notification create failed (sale completed): $e');
           }
         }
       }
@@ -241,6 +260,12 @@ class SalesService {
     }
   }
 
+  /// Trừ kho khi phát hành hóa đơn điện tử (dùng khi deductStockOnEinvoiceOnly)
+  /// Gọi sau khi createInvoice thành công, trước khi updateSale với isStockUpdated: true
+  Future<void> deductStockForSale(SaleModel sale) async {
+    await _updateProductStocks(sale.items, sale);
+  }
+
   /// Cập nhật stock của các sản phẩm sau khi bán
   Future<void> _updateProductStocks(List<SaleItem> items, SaleModel sale) async {
     if (_productService == null) {
@@ -327,19 +352,29 @@ class SalesService {
   /// PRO: Ưu tiên Firestore, nếu lỗi thì fallback SQLite
   /// BASIC: Chỉ lấy từ SQLite
   /// Web: Chỉ lấy từ Firestore
+  /// [sellerId] Lọc theo nhân viên (KiotViet)
+  /// [statusValue] Lọc theo trạng thái đơn: Delivered, Processing, Cancelled
   Future<List<SaleModel>> getSales({
     DateTime? startDate,
     DateTime? endDate,
-    String? branchId, // Lọc theo chi nhánh
+    String? branchId,
+    String? sellerId,
+    String? statusValue,
   }) async {
-    // Helper function để filter theo date và branchId nếu cần
-    List<SaleModel> filterSales(List<SaleModel> sales, DateTime? start, DateTime? end, String? branchId) {
+    List<SaleModel> filterSales(
+      List<SaleModel> sales,
+      DateTime? start,
+      DateTime? end,
+      String? bid,
+      String? sid,
+      String? status,
+    ) {
       return sales.where((sale) {
-        // Filter theo date
         if (start != null && sale.timestamp.isBefore(start)) return false;
         if (end != null && sale.timestamp.isAfter(end)) return false;
-        // Filter theo branchId
-        if (branchId != null && branchId.isNotEmpty && sale.branchId != branchId) return false;
+        if (bid != null && bid.isNotEmpty && sale.branchId != bid) return false;
+        if (sid != null && sid.isNotEmpty && sale.sellerId != sid) return false;
+        if (status != null && status.isNotEmpty && sale.statusValue != status) return false;
         return true;
       }).toList();
     }
@@ -363,9 +398,10 @@ class SalesService {
         }
 
         final snapshot = await query.get();
-        return snapshot.docs
+        final list = snapshot.docs
             .map((doc) => SaleModel.fromFirestore(doc.data(), doc.id))
             .toList();
+        return filterSales(list, startDate, endDate, branchId, sellerId, statusValue);
       } catch (e) {
         if (kDebugMode) {
           debugPrint('⚠️ Firestore query with date filter failed, trying without filter: $e');
@@ -376,7 +412,7 @@ class SalesService {
           final allSales = snapshot.docs
               .map((doc) => SaleModel.fromFirestore(doc.data(), doc.id))
               .toList();
-          return filterSales(allSales, startDate, endDate, branchId);
+          return filterSales(allSales, startDate, endDate, branchId, sellerId, statusValue);
         } catch (e2) {
           if (kDebugMode) {
             debugPrint('❌ Error loading sales from Firestore: $e2');
@@ -405,9 +441,10 @@ class SalesService {
         }
 
         final snapshot = await query.get();
-        final sales = snapshot.docs
+        var sales = snapshot.docs
             .map((doc) => SaleModel.fromFirestore(doc.data(), doc.id))
             .toList();
+        sales = filterSales(sales, startDate, endDate, branchId, sellerId, statusValue);
 
         // Đồng bộ vào SQLite để dự phòng
         for (final sale in sales) {
@@ -425,12 +462,12 @@ class SalesService {
           debugPrint('⚠️ Firestore error, falling back to SQLite: $e');
         }
         final allSales = await _localDb.getSales(userId: userId);
-        return filterSales(allSales, startDate, endDate, branchId);
+        return filterSales(allSales, startDate, endDate, branchId, sellerId, statusValue);
       }
     } else {
-      // BASIC: Chỉ lấy từ SQLite và filter theo date và branchId
+      // BASIC: Chỉ lấy từ SQLite và filter
       final allSales = await _localDb.getSales(userId: userId);
-      return filterSales(allSales, startDate, endDate, branchId);
+      return filterSales(allSales, startDate, endDate, branchId, sellerId, statusValue);
     }
   }
 
@@ -464,12 +501,73 @@ class SalesService {
     }
   }
 
-  /// Lắng nghe thay đổi real-time từ Firestore (chỉ cho PRO và Web).
-  /// Khi có đơn hàng mới từ thiết bị khác, stream sẽ emit danh sách sales mới.
-  Stream<List<SaleModel>>? watchSales() {
-    if (!isPro && !kIsWeb) {
-      return null;
+  /// Phân trang: lấy [limit] đơn hàng, dùng [startAfterDocument] cho trang tiếp theo (chỉ 1 lần đọc).
+  /// Trả về (danh sách, lastDocument để gọi trang sau; null = hết trang hoặc BASIC).
+  /// [sellerId] [statusValue] lọc trong bộ nhớ sau khi lấy trang (KiotViet).
+  Future<({List<SaleModel> sales, DocumentSnapshot? lastDoc})> getSalesPaginated({
+    int limit = 20,
+    DocumentSnapshot? startAfterDocument,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? branchId,
+    String? sellerId,
+    String? statusValue,
+  }) async {
+    List<SaleModel> filterSales(
+      List<SaleModel> sales,
+      DateTime? start,
+      DateTime? end,
+      String? bid,
+      String? sid,
+      String? status,
+    ) {
+      return sales.where((sale) {
+        if (start != null && sale.timestamp.isBefore(start)) return false;
+        if (end != null && sale.timestamp.isAfter(end)) return false;
+        if (bid != null && bid.isNotEmpty && sale.branchId != bid) return false;
+        if (sid != null && sid.isNotEmpty && sale.sellerId != sid) return false;
+        if (status != null && status.isNotEmpty && sale.statusValue != status) return false;
+        return true;
+      }).toList();
     }
+
+    if (!isPro && !kIsWeb) {
+      final all = await _localDb.getSales(userId: userId);
+      final filtered = filterSales(all, startDate, endDate, branchId, sellerId, statusValue);
+      return (sales: filtered, lastDoc: null);
+    }
+    try {
+      Query<Map<String, dynamic>> query = _salesCollection
+          .orderBy('timestamp', descending: true)
+          .limit(limit);
+      if (startDate != null) {
+        query = query.where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
+      }
+      if (endDate != null) {
+        query = query.where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
+      }
+      if (branchId != null && branchId.isNotEmpty) {
+        query = query.where('branchId', isEqualTo: branchId);
+      }
+      if (startAfterDocument != null) {
+        query = query.startAfterDocument(startAfterDocument);
+      }
+      final snapshot = await query.get();
+      var sales = snapshot.docs
+          .map((doc) => SaleModel.fromFirestore(doc.data(), doc.id))
+          .toList();
+      sales = filterSales(sales, startDate, endDate, branchId, sellerId, statusValue);
+      final lastDoc = snapshot.docs.isEmpty ? null : snapshot.docs.last;
+      return (sales: sales, lastDoc: lastDoc);
+    } catch (e) {
+      if (kDebugMode) debugPrint('getSalesPaginated error: $e');
+      rethrow;
+    }
+  }
+
+  /// @deprecated Dùng getSales() + refresh khi cần thay vì stream để tiết kiệm lượt đọc Firestore.
+  Stream<List<SaleModel>>? watchSales() {
+    if (!isPro && !kIsWeb) return null;
     try {
       return _salesCollection
           .orderBy('timestamp', descending: true)
@@ -478,9 +576,7 @@ class SalesService {
               .map((doc) => SaleModel.fromFirestore(doc.data(), doc.id))
               .toList());
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error watching sales from Firestore: $e');
-      }
+      if (kDebugMode) debugPrint('Error watching sales from Firestore: $e');
       return null;
     }
   }
@@ -573,6 +669,141 @@ class SalesService {
 
       return todaySales.length;
     }
+  }
+
+  /// Lợi nhuận gộp trong khoảng thời gian (dựa cost/importPrice và giá bán).
+  /// Trả về (revenue, cost, profit). Cần ProductService để lấy giá vốn.
+  Future<({double revenue, double cost, double profit})> getGrossProfit({
+    DateTime? startDate,
+    DateTime? endDate,
+    String? branchId,
+  }) async {
+    final sales = await getSales(
+      startDate: startDate,
+      endDate: endDate,
+      branchId: branchId,
+    );
+    double revenue = 0.0;
+    double cost = 0.0;
+    if (_productService == null) {
+      for (final sale in sales) {
+        revenue += sale.totalAmount;
+      }
+      return (revenue: revenue, cost: 0.0, profit: revenue);
+    }
+    for (final sale in sales) {
+      for (final item in sale.items) {
+        revenue += item.subtotal;
+        final product = await _productService.getProductById(item.productId);
+        final unitCost = product?.importPrice ?? 0.0;
+        cost += item.quantity * unitCost;
+      }
+    }
+    return (revenue: revenue, cost: cost, profit: revenue - cost);
+  }
+
+  /// Lợi nhuận gộp theo ngày (dùng cho dashboard / báo cáo).
+  Future<ProfitReport> getProfitByDay({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? branchId,
+  }) async {
+    final sales = await getSales(
+      startDate: startDate,
+      endDate: endDate,
+      branchId: branchId,
+    );
+    final map = <String, ({double revenue, double cost})>{};
+    for (final sale in sales) {
+      final key = '${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}-${sale.timestamp.day.toString().padLeft(2, '0')}';
+      if (!map.containsKey(key)) map[key] = (revenue: 0.0, cost: 0.0);
+      for (final item in sale.items) {
+        final cur = map[key]!;
+        double addCost = 0.0;
+        if (_productService != null) {
+          final product = await _productService.getProductById(item.productId);
+          addCost = item.quantity * (product?.importPrice ?? 0.0);
+        }
+        map[key] = (revenue: cur.revenue + item.subtotal, cost: cur.cost + addCost);
+      }
+    }
+    final items = <ProfitReportItem>[];
+    final keys = map.keys.toList()..sort();
+    for (final key in keys) {
+      final parts = key.split('-');
+      if (parts.length != 3) continue;
+      final date = DateTime(
+        int.parse(parts[0]),
+        int.parse(parts[1]),
+        int.parse(parts[2]),
+      );
+      final cur = map[key]!;
+      final r = cur.revenue;
+      final c = cur.cost;
+      items.add(ProfitReportItem(
+        date: date,
+        revenue: r,
+        cost: c,
+        profit: r - c,
+      ));
+    }
+    return ProfitReport(
+      startDate: startDate,
+      endDate: endDate,
+      branchId: branchId,
+      byMonth: false,
+      items: items,
+    );
+  }
+
+  /// Lợi nhuận gộp theo tháng.
+  Future<ProfitReport> getProfitByMonth({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? branchId,
+  }) async {
+    final sales = await getSales(
+      startDate: startDate,
+      endDate: endDate,
+      branchId: branchId,
+    );
+    final map = <String, ({double revenue, double cost})>{};
+    for (final sale in sales) {
+      final key = '${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}';
+      if (!map.containsKey(key)) map[key] = (revenue: 0.0, cost: 0.0);
+      for (final item in sale.items) {
+        final cur = map[key]!;
+        double addCost = 0.0;
+        if (_productService != null) {
+          final product = await _productService.getProductById(item.productId);
+          addCost = item.quantity * (product?.importPrice ?? 0.0);
+        }
+        map[key] = (revenue: cur.revenue + item.subtotal, cost: cur.cost + addCost);
+      }
+    }
+    final items = <ProfitReportItem>[];
+    final keys = map.keys.toList()..sort();
+    for (final key in keys) {
+      final parts = key.split('-');
+      if (parts.length != 2) continue;
+      final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), 1);
+      final cur = map[key]!;
+      final r = cur.revenue;
+      final c = cur.cost;
+      items.add(ProfitReportItem(
+        date: date,
+        revenue: r,
+        cost: c,
+        profit: r - c,
+      ));
+    }
+    return ProfitReport(
+      startDate: startDate,
+      endDate: endDate,
+      branchId: branchId,
+      byMonth: true,
+      items: items,
+    );
   }
 }
 

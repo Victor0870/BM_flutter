@@ -1,18 +1,13 @@
-import 'dart:io' show File, Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:excel/excel.dart' hide Border;
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as path;
 import '../../controllers/sales_return_provider.dart';
-import '../../utils/platform_utils.dart';
 import '../../controllers/branch_provider.dart';
 import '../../controllers/customer_provider.dart';
 import '../../models/sales_return_model.dart';
+import '../../services/export_service.dart';
+import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 import '../../widgets/date_range_filter.dart';
 
@@ -75,7 +70,7 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final provider = context.read<SalesReturnProvider>();
     final salesReturns = provider.salesReturns;
-    
+
     if (salesReturns.isEmpty) {
       messenger.showSnackBar(
         const SnackBar(
@@ -87,92 +82,59 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
     }
 
     try {
-      // Tạo Excel file
-      final excel = Excel.createExcel();
-      excel.delete('Sheet1');
-      final sheet = excel['Báo cáo hàng trả'];
-
-      // Header row
-      sheet.appendRow([
-        TextCellValue('Mã đơn trả'),
-        TextCellValue('Mã đơn gốc'),
-        TextCellValue('Khách hàng'),
-        TextCellValue('Giá trị trả (₫)'),
-        TextCellValue('Lý do'),
-        TextCellValue('Phương thức hoàn tiền'),
-        TextCellValue('Ngày thực hiện'),
-      ]);
-
-      // Data rows
-      for (var salesReturn in salesReturns) {
-        final customerName = await _getCustomerName(salesReturn.customerId);
-        sheet.appendRow([
-          TextCellValue(salesReturn.id.substring(0, 8).toUpperCase()),
-          TextCellValue(salesReturn.originalSaleId.substring(0, 8).toUpperCase()),
-          TextCellValue(customerName ?? 'Khách lẻ'),
-          IntCellValue(salesReturn.totalRefundAmount.toInt()),
-          TextCellValue(salesReturn.reason),
-          TextCellValue(_formatPaymentMethod(salesReturn.paymentMethod)),
-          TextCellValue(DateFormat('dd/MM/yyyy HH:mm').format(salesReturn.timestamp)),
+      final rows = <List<Object?>>[];
+      for (final sr in salesReturns) {
+        final customerName = await _getCustomerName(sr.customerId);
+        rows.add([
+          sr.id.substring(0, 8).toUpperCase(),
+          sr.originalSaleId.substring(0, 8).toUpperCase(),
+          customerName ?? 'Khách lẻ',
+          sr.totalRefundAmount.toInt(),
+          sr.reason,
+          _formatPaymentMethod(sr.paymentMethod),
+          DateFormat('dd/MM/yyyy HH:mm').format(sr.timestamp),
         ]);
       }
 
-      // Summary row
-      sheet.appendRow([]);
-      sheet.appendRow([
-        TextCellValue('TỔNG CỘNG'),
-        TextCellValue(''),
-        TextCellValue(''),
-        IntCellValue(provider.totalRefundAmount.toInt()),
-        TextCellValue(''),
-        TextCellValue(''),
-        TextCellValue(''),
-      ]);
+      final result = await ExportService.instance.exportToExcelFromRows(
+        fileName: 'Bao_cao_hang_tra_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+        sheetName: 'Báo cáo hàng trả',
+        headers: const [
+          'Mã đơn trả',
+          'Mã đơn gốc',
+          'Khách hàng',
+          'Giá trị trả (₫)',
+          'Lý do',
+          'Phương thức hoàn tiền',
+          'Ngày thực hiện',
+        ],
+        rows: rows,
+        summaryRow: [
+          'TỔNG CỘNG',
+          '',
+          '',
+          provider.totalRefundAmount.toInt(),
+          '',
+          '',
+          '',
+        ],
+      );
 
-      // Lưu file
-      final fileName = 'Bao_cao_hang_tra_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx';
-      
-      if (kIsWeb) {
-        // Web: Download file
-        final bytes = excel.save();
-        if (bytes != null) {
-          if (!context.mounted) return;
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text('File Excel đã được tạo: $fileName'),
-              action: SnackBarAction(
-                label: 'Tải về',
-                onPressed: () {
-                  // ignore: todo
-                  // TODO: Implement download for web
-                },
-              ),
-            ),
-          );
-        }
+      if (!context.mounted) return;
+      if (result.savedFilePath != null) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Đã xuất Excel: ${result.suggestedFileName}'),
+            backgroundColor: Colors.green,
+          ),
+        );
       } else {
-        // Mobile/Desktop: Lưu vào thư mục Downloads hoặc Documents
-        final directory = Platform.isAndroid
-            ? await getExternalStorageDirectory()
-            : await getApplicationDocumentsDirectory();
-        
-        if (directory != null) {
-          final filePath = path.join(directory.path, fileName);
-          final file = File(filePath);
-          final bytes = excel.save();
-          if (bytes != null) {
-            await file.writeAsBytes(bytes);
-            
-            if (context.mounted) {
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text('Đã xuất Excel: $fileName'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
-          }
-        }
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('File đã tạo: ${result.suggestedFileName}. Trên web dùng tải về nếu có.'),
+            backgroundColor: Colors.blue,
+          ),
+        );
       }
     } catch (e) {
       if (context.mounted) {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../controllers/auth_provider.dart';
+import '../../controllers/locale_provider.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Màn hình đăng nhập/đăng ký cho Mobile (Android/iOS).
 class AuthScreenMobile extends StatefulWidget {
@@ -66,8 +68,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
     if (!authProvider.isFirebaseReady) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Firebase chưa sẵn sàng. Vui lòng thử lại sau.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.firebaseNotReady),
             backgroundColor: Colors.red,
           ),
         );
@@ -84,15 +86,15 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
       if (mounted) {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Đăng nhập thành công!'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.loginSuccess),
               backgroundColor: Colors.green,
             ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(authProvider.errorMessage ?? 'Đăng nhập thất bại'),
+              content: Text(authProvider.errorMessage ?? AppLocalizations.of(context)!.loginFailed),
               backgroundColor: Colors.red,
             ),
           );
@@ -102,8 +104,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
       if (_passwordController.text != _confirmPasswordController.text) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Mật khẩu xác nhận không khớp'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.passwordMismatch),
               backgroundColor: Colors.red,
             ),
           );
@@ -120,8 +122,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
         if (_shopIdController.text.trim().isEmpty) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Vui lòng nhập hoặc quét Shop ID của cửa hàng'),
+              SnackBar(
+                content: Text(AppLocalizations.of(context)!.pleaseEnterShopId),
                 backgroundColor: Colors.red,
               ),
             );
@@ -137,16 +139,16 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
       if (mounted) {
         if (success) {
           final message = _isOwner
-              ? 'Đăng ký thành công! Đang tạo cửa hàng...'
+              ? AppLocalizations.of(context)!.registerSuccess
               : (authProvider.errorMessage ??
-                  'Đăng ký thành công, vui lòng đợi Admin phê duyệt.');
+                  AppLocalizations.of(context)!.registerSuccessStaff);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(message), backgroundColor: Colors.green),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(authProvider.errorMessage ?? 'Đăng ký thất bại'),
+              content: Text(authProvider.errorMessage ?? AppLocalizations.of(context)!.registerFailed),
               backgroundColor: Colors.red,
             ),
           );
@@ -161,7 +163,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Quét mã QR cửa hàng'),
+        title: Text(AppLocalizations.of(context)!.scanShopQrTitle),
         content: SizedBox(
           width: 300,
           height: 300,
@@ -178,7 +180,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Đóng'),
+            child: Text(AppLocalizations.of(context)!.close),
           ),
         ],
       ),
@@ -209,7 +211,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'BizMate POS',
+                      AppLocalizations.of(context)!.appTitle,
                       style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                             color: Theme.of(context).colorScheme.primary,
@@ -219,10 +221,10 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                     const SizedBox(height: 8),
                     Text(
                       _isLogin
-                          ? 'Đăng nhập vào tài khoản'
+                          ? AppLocalizations.of(context)!.loginToAccount
                           : (_isOwner
-                              ? 'Đăng ký Chủ cửa hàng'
-                              : 'Đăng ký Nhân viên'),
+                              ? AppLocalizations.of(context)!.registerOwner
+                              : AppLocalizations.of(context)!.registerStaff),
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: Colors.grey[600],
                           ),
@@ -234,13 +236,13 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           ChoiceChip(
-                            label: const Text('Chủ shop'),
+                            label: Text(AppLocalizations.of(context)!.ownerChip),
                             selected: _isOwner,
                             onSelected: (_) => setState(() => _isOwner = true),
                           ),
                           const SizedBox(width: 8),
                           ChoiceChip(
-                            label: const Text('Nhân viên'),
+                            label: Text(AppLocalizations.of(context)!.staffChip),
                             selected: !_isOwner,
                             onSelected: (_) => setState(() => _isOwner = false),
                           ),
@@ -251,8 +253,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                     TextFormField(
                       controller: _emailController,
                       decoration: InputDecoration(
-                        labelText: 'Email',
-                        hintText: 'example@email.com',
+                        labelText: AppLocalizations.of(context)!.email,
+                        hintText: AppLocalizations.of(context)!.emailHint,
                         prefixIcon: const Icon(Icons.email),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -261,8 +263,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Vui lòng nhập email';
-                        if (!v.contains('@')) return 'Email không hợp lệ';
+                        if (v == null || v.trim().isEmpty) return AppLocalizations.of(context)!.pleaseEnterEmail;
+                        if (!v.contains('@')) return AppLocalizations.of(context)!.invalidEmail;
                         return null;
                       },
                     ),
@@ -271,12 +273,12 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                       TextFormField(
                         controller: _shopIdController,
                         decoration: InputDecoration(
-                          labelText: 'Shop ID',
-                          hintText: 'Nhập hoặc quét Shop ID',
+                          labelText: AppLocalizations.of(context)!.shopId,
+                          hintText: AppLocalizations.of(context)!.shopIdHint,
                           prefixIcon: const Icon(Icons.store),
                           suffixIcon: IconButton(
                             icon: const Icon(Icons.qr_code_scanner),
-                            tooltip: 'Quét mã QR cửa hàng',
+                            tooltip: AppLocalizations.of(context)!.scanShopQr,
                             onPressed: _scanShopQr,
                           ),
                           border: OutlineInputBorder(
@@ -289,7 +291,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                     TextFormField(
                       controller: _passwordController,
                       decoration: InputDecoration(
-                        labelText: 'Mật khẩu',
+                        labelText: AppLocalizations.of(context)!.password,
                         prefixIcon: const Icon(Icons.lock),
                         suffixIcon: IconButton(
                           icon: Icon(
@@ -304,8 +306,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                       obscureText: _obscurePassword,
                       textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Vui lòng nhập mật khẩu';
-                        if (!_isLogin && v.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';
+                        if (v == null || v.trim().isEmpty) return AppLocalizations.of(context)!.pleaseEnterPassword;
+                        if (!_isLogin && v.length < 6) return AppLocalizations.of(context)!.passwordMinLength;
                         return null;
                       },
                       onFieldSubmitted: (_) => _isLogin ? _handleSubmit() : null,
@@ -322,7 +324,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                             child: GestureDetector(
                               onTap: () => setState(() => _rememberMe = !_rememberMe),
                               child: Text(
-                                'Ghi nhớ mật khẩu',
+                                AppLocalizations.of(context)!.rememberPassword,
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
@@ -335,7 +337,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                       TextFormField(
                         controller: _confirmPasswordController,
                         decoration: InputDecoration(
-                          labelText: 'Xác nhận mật khẩu',
+                          labelText: AppLocalizations.of(context)!.confirmPassword,
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -353,8 +355,8 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                         obscureText: _obscureConfirmPassword,
                         textInputAction: TextInputAction.done,
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Vui lòng xác nhận mật khẩu';
-                          if (v != _passwordController.text) return 'Mật khẩu xác nhận không khớp';
+                          if (v == null || v.trim().isEmpty) return AppLocalizations.of(context)!.pleaseConfirmPassword;
+                          if (v != _passwordController.text) return AppLocalizations.of(context)!.passwordMismatch;
                           return null;
                         },
                         onFieldSubmitted: (_) => _handleSubmit(),
@@ -377,7 +379,7 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : Text(
-                                _isLogin ? 'Đăng nhập' : 'Đăng ký',
+                                _isLogin ? AppLocalizations.of(context)!.login : AppLocalizations.of(context)!.register,
                                 style: const TextStyle(fontSize: 16),
                               ),
                       ),
@@ -395,9 +397,28 @@ class _AuthScreenMobileState extends State<AuthScreenMobile> {
                       },
                       child: Text(
                         _isLogin
-                            ? 'Chưa có tài khoản? Đăng ký ngay'
-                            : 'Đã có tài khoản? Đăng nhập',
+                            ? AppLocalizations.of(context)!.noAccountRegister
+                            : AppLocalizations.of(context)!.haveAccountLogin,
                       ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '🌐',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => context.read<LocaleProvider>().setLocale(const Locale('vi')),
+                          child: Text('Tiếng Việt'),
+                        ),
+                        TextButton(
+                          onPressed: () => context.read<LocaleProvider>().setLocale(const Locale('en')),
+                          child: const Text('English'),
+                        ),
+                      ],
                     ),
                   ],
                 ),

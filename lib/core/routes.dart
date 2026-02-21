@@ -2,7 +2,9 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../controllers/auth_provider.dart';
 import '../models/product_model.dart';
 import '../models/sale_model.dart';
 import '../views/common/feature_coming_soon_screen.dart';
@@ -22,9 +24,18 @@ import '../views/sales/sales_screen.dart';
 import '../views/sales/sales_return_form_screen.dart';
 import '../views/sales/einvoice_management_screen.dart';
 import '../views/reports/sales_return_report_screen.dart';
+import '../views/reports/revenue_report_screen.dart';
+import '../views/reports/profit_report_screen.dart';
+import '../views/reports/low_stock_report_screen.dart';
+import '../views/reports/expiry_report_screen.dart';
 import '../views/settings/shop_settings_screen.dart';
+import '../views/settings/account_package_screen.dart';
 import '../views/employees/employee_management_screen.dart';
+import '../views/employees/employee_group_management_screen.dart';
 import '../widgets/app_sidebar.dart';
+import '../widgets/permission_guard.dart';
+import '../widgets/pro_required_dialog.dart';
+import 'permission_routes.dart';
 
 /// Định nghĩa routes cho ứng dụng
 class AppRoutes {
@@ -34,6 +45,7 @@ class AppRoutes {
   static const String sales = '/sales';
   static const String salesHistory = '/sales-history';
   static const String shopSettings = '/shop-settings';
+  static const String accountPackage = '/account-package';
   static const String purchase = '/purchase';
   static const String stockOverview = '/stock-overview';
   static const String inventoryReport = '/inventory-report';
@@ -64,6 +76,8 @@ class AppRoutes {
     static const String stockMovementReport = '/report-stock-movement';
     static const String debtReport = '/report-debt';
     static const String salesReturnReport = '/report-sales-return';
+  static const String lowStockReport = '/report-low-stock';
+  static const String expiryReport = '/report-expiry';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     final bool isDesktop =
@@ -84,6 +98,8 @@ class AppRoutes {
           return const SalesHistoryScreen();
         case shopSettings:
           return const ShopSettingsScreen();
+        case accountPackage:
+          return const AccountPackageScreen();
         case purchase:
           return const PurchaseScreen();
         case stockOverview:
@@ -91,7 +107,11 @@ class AppRoutes {
         case inventoryReport:
           return const InventoryReportScreen();
         case purchaseHistory:
-          return const PurchaseHistoryScreen();
+          final purchaseArgs = settings.arguments;
+          final highlightId = purchaseArgs is Map
+              ? purchaseArgs['highlightPurchaseId'] as String?
+              : null;
+          return PurchaseHistoryScreen(highlightPurchaseId: highlightId);
         case branchManagement:
           return const BranchManagementScreen();
         case customerManagement:
@@ -125,19 +145,29 @@ class AppRoutes {
         case appAccountSettings:
           return const FeatureComingSoonScreen(title: 'Tài khoản ứng dụng');
         case employeeManagement:
-          return const EmployeeManagementScreen();
+          return Consumer<AuthProvider>(builder: (context, auth, _) {
+            if (!auth.isPro) return _ProRequiredDialogThenPop(featureName: 'Quản lý nhân viên');
+            return const EmployeeManagementScreen();
+          });
         case employeeGroupManagement:
-          return const FeatureComingSoonScreen(title: 'Nhóm nhân viên');
+          return Consumer<AuthProvider>(builder: (context, auth, _) {
+            if (!auth.isPro) return _ProRequiredDialogThenPop(featureName: 'Nhóm nhân viên');
+            return const EmployeeGroupManagementScreen();
+          });
         case salesReport:
-          return const FeatureComingSoonScreen(title: 'Báo cáo doanh số');
+          return const RevenueReportScreen();
         case profitReport:
-          return const FeatureComingSoonScreen(title: 'Báo cáo lợi nhuận');
+          return const ProfitReportScreen();
         case stockMovementReport:
           return const InventoryReportScreen(); // Sử dụng màn hình báo cáo mới
         case debtReport:
           return const FeatureComingSoonScreen(title: 'Báo cáo công nợ');
         case salesReturnReport:
           return const SalesReturnReportScreen();
+        case lowStockReport:
+          return const LowStockReportScreen();
+        case expiryReport:
+          return const ExpiryReportScreen();
         default:
           return const Scaffold(
             body: Center(
@@ -155,14 +185,17 @@ class AppRoutes {
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
         pageBuilder: (context, animation, secondaryAnimation) {
-          final Widget content = buildContent();
+          final Widget rawContent = buildContent();
+          final String activeRoute = settings.name ?? '';
+          final perm = PermissionRoutes.requiredPermissionForRoute(activeRoute);
+          final Widget content = perm != null
+              ? PermissionGuard(requiredPermission: perm, child: rawContent)
+              : rawContent;
 
           // Màn bán hàng và các màn detail: không có sidebar, hiển thị full-screen
           if (settings.name == sales || settings.name == saleDetail) {
             return content;
           }
-
-          final String activeRoute = settings.name ?? '';
 
           return Row(
             children: [
@@ -184,13 +217,17 @@ class AppRoutes {
     return MaterialPageRoute(
       settings: settings,
       builder: (context) {
-        final Widget content = buildContent();
+        final Widget rawContent = buildContent();
+        final String activeRoute = settings.name ?? '';
+        final perm = PermissionRoutes.requiredPermissionForRoute(activeRoute);
+        final Widget content = perm != null
+            ? PermissionGuard(requiredPermission: perm, child: rawContent)
+            : rawContent;
         final double width = MediaQuery.sizeOf(context).width;
         final bool useSidebar = width >= 600 &&
             settings.name != sales &&
             settings.name != saleDetail;
         if (useSidebar) {
-          final String activeRoute = settings.name ?? '';
           return Row(
             children: [
               AppSidebar(
@@ -210,3 +247,28 @@ class AppRoutes {
   }
 }
 
+/// Widget hiển thị dialog "Tính năng gói PRO" rồi pop route (dùng khi Basic truy cập trực tiếp route nhân viên).
+class _ProRequiredDialogThenPop extends StatefulWidget {
+  final String featureName;
+
+  const _ProRequiredDialogThenPop({required this.featureName});
+
+  @override
+  State<_ProRequiredDialogThenPop> createState() => _ProRequiredDialogThenPopState();
+}
+
+class _ProRequiredDialogThenPopState extends State<_ProRequiredDialogThenPop> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showProRequiredDialog(context, featureName: widget.featureName);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(body: SizedBox.shrink());
+}

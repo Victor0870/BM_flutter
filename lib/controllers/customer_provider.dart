@@ -76,6 +76,17 @@ class CustomerProvider with ChangeNotifier {
     }
   }
 
+  /// Đồng bộ tăng dần khi app resume: chỉ đọc customer có updatedAt > lastSync, merge SQLite rồi reload.
+  Future<void> syncIncremental() async {
+    if (_customerService == null || !authProvider.isPro) return;
+    try {
+      await _customerService!.syncIncrementalFromCloud();
+      await loadCustomers();
+    } catch (e) {
+      if (kDebugMode) debugPrint('CustomerProvider syncIncremental error: $e');
+    }
+  }
+
   /// Tải danh sách nhóm khách hàng
   Future<void> loadCustomerGroups() async {
     if (_customerService == null) {
@@ -144,6 +155,32 @@ class CustomerProvider with ChangeNotifier {
       }
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Import hàng loạt khách hàng (dùng batch Firestore + SQLite). [onProgress] 0.0 -> 1.0.
+  Future<({int successCount, int failCount})> addCustomersFromList(
+    List<CustomerModel> customers, {
+    void Function(double)? onProgress,
+  }) async {
+    if (_customerService == null) {
+      _errorMessage = 'Chưa đăng nhập';
+      notifyListeners();
+      return (successCount: 0, failCount: customers.length);
+    }
+    try {
+      _errorMessage = null;
+      await _customerService!.addCustomersBatch(customers, onProgress: onProgress);
+      await loadCustomers();
+      notifyListeners();
+      return (successCount: customers.length, failCount: 0);
+    } catch (e) {
+      _errorMessage = 'Lỗi khi import khách hàng: ${e.toString()}';
+      if (kDebugMode) {
+        debugPrint('CustomerProvider addCustomersFromList error: $_errorMessage');
+      }
+      notifyListeners();
+      return (successCount: 0, failCount: customers.length);
     }
   }
 

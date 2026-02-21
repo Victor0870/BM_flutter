@@ -49,11 +49,31 @@ Ví dụ:
 ### `views/`
 Chứa các screen/page widgets của ứng dụng.
 
-Ví dụ:
+#### Quy tắc 3 tệp cho màn hình phức tạp (responsive)
+Mọi màn hình phức tạp (có layout khác biệt rõ ràng giữa điện thoại và màn hình rộng) **bắt buộc** tách thành 3 tệp:
+
+1. **`xxx_screen.dart`** — Tệp điều phối chính (Router / Responsive switch)
+   - Chỉ chứa logic chung (state, load data, callbacks) và `build()` chọn hiển thị Mobile hoặc Desktop theo platform.
+   - Sử dụng `lib/utils/platform_utils.dart` (`isMobilePlatform` / `isDesktopPlatform`) để quyết định, không viết `if/else` thủ công phân nhánh UI trong file này.
+
+2. **`xxx_screen_mobile.dart`** — Giao diện tối ưu cho điện thoại
+   - Thường dùng ListView, Card, bottom sheet, tab dưới.
+   - Chỉ chứa UI và logic hiển thị cho mobile; không ảnh hưởng layout desktop.
+
+3. **`xxx_screen_desktop.dart`** — Giao diện tối ưu cho màn hình rộng
+   - Thường dùng DataTable, Sidebar, layout 2 cột.
+   - Chỉ chứa UI và logic hiển thị cho desktop; không ảnh hưởng layout mobile.
+
+**Điều hướng:** Luôn dùng `platform_utils.dart` để kiểm tra nền tảng thay vì viết `if (Platform.isAndroid || ...)` trong tệp UI.
+
+**Tính độc lập:** Tuyệt đối không sửa logic UI trong tệp Mobile mà làm ảnh hưởng layout Desktop và ngược lại.
+
+Ví dụ đã áp dụng: `home_screen.dart` + `home_screen_mobile.dart` + `home_screen_desktop.dart`, `auth_screen.dart` + `auth_screen_mobile.dart` + `auth_screen_desktop.dart`, `splash_screen.dart` + `splash_screen_mobile.dart` + `splash_screen_desktop.dart`.
+
+Ví dụ chung:
 - `login_screen.dart`
-- `home_screen.dart`
-- `products_screen.dart`
-- `pos_screen.dart` - Màn hình bán hàng (POS)
+- `home_screen.dart` (router) + `home_screen_mobile.dart` + `home_screen_desktop.dart`
+- `products_screen.dart` / `pos_screen.dart` - Màn hình bán hàng (POS)
 - `inventory_screen.dart` - Màn hình quản lý kho
 
 ### `widgets/`

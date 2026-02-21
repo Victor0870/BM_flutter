@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../controllers/notification_provider.dart';
 import '../../controllers/sales_provider.dart';
+import '../../core/routes.dart';
 import '../../models/notification_model.dart';
 import '../../utils/platform_utils.dart';
 import '../sales/sale_detail_screen.dart';
@@ -73,6 +74,24 @@ class NotificationScreen extends StatelessWidget {
             builder: (_) => SaleDetailScreen(sale: sale, forceMobile: forceMobile),
           ),
         );
+      }
+      return;
+    }
+
+    if (n.type == 'new_purchase' && n.relatedId != null && n.relatedId!.isNotEmpty) {
+      if (context.mounted) {
+        Navigator.pushNamed(
+          context,
+          AppRoutes.purchaseHistory,
+          arguments: {'highlightPurchaseId': n.relatedId},
+        );
+      }
+      return;
+    }
+
+    if (n.type == 'stock_alert') {
+      if (context.mounted) {
+        Navigator.pushNamed(context, AppRoutes.lowStockReport);
       }
     }
   }
@@ -203,6 +222,8 @@ class _NotificationTile extends StatelessWidget {
         return Icons.warning_amber_rounded;
       case 'new_sale':
         return Icons.shopping_cart_rounded;
+      case 'new_purchase':
+        return Icons.inventory_2_rounded;
       default:
         return Icons.notifications_rounded;
     }

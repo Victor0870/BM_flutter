@@ -37,18 +37,34 @@ class NotificationModel {
     return null;
   }
 
+  /// Lấy String an toàn từ Firestore (tránh crash khi kiểu khác String).
+  static String _safeString(dynamic value) {
+    if (value == null) return '';
+    if (value is String) return value;
+    return value.toString();
+  }
+
+  /// Lấy String? optional an toàn (cho relatedId).
+  static String? _safeStringOptional(dynamic value) {
+    if (value == null) return null;
+    if (value is String) return value.isEmpty ? null : value;
+    final s = value.toString();
+    return s.isEmpty ? null : s;
+  }
+
   /// Tạo NotificationModel từ Firestore document.
+  /// Xử lý thiếu trường / null / kiểu sai để tránh crash.
   factory NotificationModel.fromFirestore(Map<String, dynamic> data, String id) {
     final ts = _parseFirestoreTimestamp(data['timestamp']);
     return NotificationModel(
       id: id,
-      shopId: data['shopId'] ?? '',
-      title: data['title'] ?? '',
-      body: data['body'] ?? '',
-      type: data['type'] ?? 'system',
+      shopId: _safeString(data['shopId']),
+      title: _safeString(data['title']),
+      body: _safeString(data['body']),
+      type: _safeString(data['type']).isEmpty ? 'system' : _safeString(data['type']),
       isRead: data['isRead'] == true,
       timestamp: ts ?? DateTime.now(),
-      relatedId: data['relatedId'] as String?,
+      relatedId: _safeStringOptional(data['relatedId']),
     );
   }
 

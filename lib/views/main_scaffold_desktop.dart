@@ -1,53 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../controllers/tutorial_provider.dart';
 import '../widgets/app_sidebar.dart';
+import '../widgets/app_navigation_rail.dart';
 import '../core/routes.dart';
 import 'home_screen.dart';
 import 'notifications/notification_screen.dart';
 import 'sales/sales_screen.dart';
 import 'settings/shop_settings_screen.dart';
+import 'reports/reports_hub_screen.dart';
 
-class _PlaceholderScreen extends StatelessWidget {
-  final String title;
-  final String message;
-
-  const _PlaceholderScreen({
-    required this.title,
-    required this.message,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.construction,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// MainScaffold cho Desktop (Windows/Mac/Linux/Web): Sidebar + IndexedStack, không BottomNav.
+/// MainScaffold cho Desktop/Tablet: Sidebar (≥1200px) hoặc Navigation Rail (600–1200px) + IndexedStack.
 class MainScaffoldDesktop extends StatefulWidget {
-  const MainScaffoldDesktop({super.key});
+  /// true = dùng Rail (tablet), false = dùng Sidebar đầy đủ (desktop).
+  final bool useRail;
+
+  const MainScaffoldDesktop({super.key, this.useRail = false});
 
   @override
   State<MainScaffoldDesktop> createState() => _MainScaffoldDesktopState();
@@ -59,10 +27,7 @@ class _MainScaffoldDesktopState extends State<MainScaffoldDesktop> {
   final List<Widget> _screens = [
     const HomeScreen(forceMobile: false),
     const SalesScreen(forceMobile: false),
-    const _PlaceholderScreen(
-      title: 'Báo cáo',
-      message: 'Tính năng đang phát triển',
-    ),
+    const ReportsHubScreen(forceMobile: false),
     const NotificationScreen(forceMobile: false),
     const ShopSettingsScreen(forceMobile: false),
   ];
@@ -94,26 +59,30 @@ class _MainScaffoldDesktopState extends State<MainScaffoldDesktop> {
 
   @override
   Widget build(BuildContext context) {
-    Widget body = IndexedStack(
+    final tutorialProvider = Provider.of<TutorialProvider>(context, listen: false);
+    tutorialProvider.navigateToShopSettingsCallback = () => setState(() => _currentIndex = 4);
+    final body = IndexedStack(
       index: _currentIndex,
       children: _screens,
     );
 
-    if (_currentIndex != 1) {
-      body = Row(
-        children: [
-          AppSidebar(
-            activeRoute: _getCurrentRoute(),
-            onMenuTap: _handleSidebarNavigation,
-          ),
-          Expanded(child: body),
-        ],
-      );
-    }
-
     return Scaffold(
       appBar: null,
-      body: body,
+      body: Row(
+        children: [
+          if (widget.useRail)
+            AppNavigationRail(
+              activeRoute: _getCurrentRoute(),
+              onMenuTap: _handleSidebarNavigation,
+            )
+          else
+            AppSidebar(
+              activeRoute: _getCurrentRoute(),
+              onMenuTap: _handleSidebarNavigation,
+            ),
+          Expanded(child: body),
+        ],
+      ),
       bottomNavigationBar: null,
     );
   }

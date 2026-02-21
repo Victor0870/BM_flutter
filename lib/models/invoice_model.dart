@@ -1,3 +1,11 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// KiotViet (2.5 Đặt hàng, 2.12 Hóa đơn) — các trường tương thích nằm trong
+// [SaleModel] (sale_model.dart): totalPayment (Khách thanh toán), statusValue
+// (Trạng thái: Delivered / Processing / Cancelled), paymentMethod (method:
+// CASH / CARD / TRANSFER → Tiền mặt, Thẻ, Chuyển khoản).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Hóa đơn FPT eInvoice (mẫu gửi API).
 class FPTInvoice {
   // 1. Thông tin chung hóa đơn [cite: 230, 241]
   String type = "01/MTT"; // Hóa đơn GTGT từ máy tính tiền [cite: 230]
@@ -11,11 +19,11 @@ class FPTInvoice {
   String baddr;           // Địa chỉ khách hàng (Bắt buộc) 
   String? btax;           // Mã số thuế khách hàng 
 
-  // 3. Thông tin thanh toán [cite: 246, 300, 304]
-  String paym = "TM";     // Hình thức thanh toán: TM, CK... [cite: 246]
+  // 3. Thông tin thanh toán [cite: 246, 300, 304] — KiotViet: method, totalPayment
+  String paym = "TM";     // Hình thức: TM/CK/Thẻ (Tiền mặt, Chuyển khoản, Thẻ)
   double sum;             // Tổng tiền trước thuế [cite: 300]
   double vat;             // Tổng tiền thuế [cite: 300]
-  double total;           // Tổng tiền thanh toán sau thuế [cite: 304]
+  double total;           // Tổng thanh toán sau thuế; totalPayment = số tiền khách trả [cite: 304]
 
   FPTInvoice({
     required this.sid,

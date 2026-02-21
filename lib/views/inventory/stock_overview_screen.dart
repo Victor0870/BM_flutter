@@ -13,7 +13,6 @@ import '../../core/routes.dart';
 import '../../utils/platform_utils.dart';
 import '_stock_count_dialog.dart';
 import '../../widgets/responsive_container.dart';
-import '../../widgets/ad_banner_widget.dart';
 
 
 /// Màn hình quản lý tồn kho (mobile/desktop theo platform).
@@ -217,21 +216,16 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
               ),
             ),
           ),
-          const SafeArea(top: false, child: AdBannerWidget()),
         ],
       );
     }
 
-    // Desktop: layout giống Danh sách sản phẩm — header + bảng list full, ad ở đáy
+    // Desktop: layout giống Danh sách sản phẩm — header + bảng list full
     return Column(
       children: [
         headerAndCards,
         Expanded(
           child: tableSection,
-        ),
-        const SafeArea(
-          top: false,
-          child: AdBannerWidget(),
         ),
       ],
     );
@@ -508,6 +502,11 @@ class _BranchDropdownBar extends StatelessWidget {
             (b) => DropdownMenuItem<String?>(value: b.id, child: Text(b.name)),
           ),
         ];
+        // Đảm bảo value tồn tại đúng 1 lần trong items (tránh AssertionError khi selectedBranchId = main_store nhưng không có trong branches)
+        final validValue = selectedBranchId == null ||
+            branches.any((b) => b.id == selectedBranchId)
+            ? selectedBranchId
+            : null;
         return SizedBox(
           width: double.infinity,
           child: Container(
@@ -518,7 +517,7 @@ class _BranchDropdownBar extends StatelessWidget {
               border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
             child: DropdownButton<String?>(
-              value: selectedBranchId,
+              value: validValue,
               isExpanded: true,
               underline: const SizedBox(),
               items: items,
