@@ -66,9 +66,9 @@ class ProductProvider with ChangeNotifier {
   ProductProvider(this.authProvider, {this.branchProvider}) {
     authProvider.addListener(_onAuthChanged);
     _initializeService();
-    // Phân trang: tải trang đầu (limit 20) để tiết kiệm lượt đọc Firestore.
+    // Tối ưu "1 lượt đọc": kiểm tra metadata trước, chỉ sync từ Cloud khi cần.
     if (authProvider.user != null) {
-      loadProductsPaginated();
+      _loadProductsWithMetadataCheck();
     }
     // Lắng nghe thay đổi selectedBranchId để reload products
     authProvider.addListener(_onSelectedBranchChanged);
@@ -120,11 +120,7 @@ class ProductProvider with ChangeNotifier {
       if (!wasPro && isPro) {
         migrateLocalToCloud();
       } else {
-        loadProductsPaginated();
-      }
-
-      if (isPro) {
-        _performLightSyncFromCloud();
+        _loadProductsWithMetadataCheck();
       }
     } else {
       _productService = null;
@@ -135,42 +131,73 @@ class ProductProvider with ChangeNotifier {
     }
   }
 
-  /// Light sync: lấy danh sách sản phẩm từ Cloud một lần, cập nhật SQLite và _products. Chỉ cho PRO.
-  void _performLightSyncFromCloud() {
-    if (_productService == null || !authProvider.isPro) return;
-    _productService!.fetchProductsFromCloud(includeInactive: false).then((products) {
+  /// Tải sản phẩm theo cơ chế "1 lượt đọc": đọc metadata trước, nếu không đổi thì load từ Local (0 đọc), nếu đổi thì sync từ Cloud.
+  Future<void> _loadProductsWithMetadataCheck() async {
+    if (_productService == null) {
+      _errorMessage = 'Chưa đăng nhập';
+      _safeNotifyListeners();
+      return;
+    }
+    try {
+      _isLoading = true;
+      _errorMessage = null;
+      _productsLastDoc = null;
+      _safeNotifyListeners();
+
+      final result = await _productService!.checkNeedUpdate();
       if (_disposed) return;
-      if (products.isEmpty) return;
-      _products = products;
-      _rebuildBarcodeIndex();
-      if (!kIsWeb) {
-        _productService?.syncProductsToLocal(products);
+
+      if (!result.needUpdate) {
+        // Không cần sync: load từ SQLite (0 lượt đọc Firestore cho products)
+        _products = await _productService!.getProducts(
+          includeInactive: false,
+          activeBranchId: authProvider.selectedBranchId,
+        );
+        _rebuildBarcodeIndex();
+        if (kDebugMode) {
+          debugPrint('✅ ProductProvider: loaded from local (0 Firestore product reads)');
+        }
+      } else {
+        // Cần sync: lấy từ Cloud, đồng bộ SQLite, lưu lastUpdated
+        final products = await _productService!.fetchProductsFromCloud(includeInactive: false);
+        if (_disposed) return;
+        if (!kIsWeb) {
+          await _productService!.syncProductsToLocal(products);
+          await _productService!.saveLastProductsUpdated(
+            result.serverLastUpdated ?? DateTime.now(),
+          );
+        }
+        _products = products;
+        _rebuildBarcodeIndex();
+        if (kDebugMode) {
+          debugPrint('✅ ProductProvider: synced ${products.length} products from Cloud');
+        }
+      }
+
+      _isLoading = false;
+      _safeNotifyListeners();
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = 'Lỗi khi tải danh sách sản phẩm: ${e.toString()}';
+      if (kDebugMode) {
+        debugPrint('ProductProvider _loadProductsWithMetadataCheck error: $_errorMessage');
       }
       _safeNotifyListeners();
-      if (kDebugMode) {
-        debugPrint('✅ ProductProvider light sync: ${products.length} products from Cloud');
-      }
-    }).catchError((e, st) {
-      if (kDebugMode) {
-        debugPrint('⚠️ ProductProvider light sync error: $e');
-      }
-    });
+    }
   }
 
   /// Xử lý khi selectedBranchId thay đổi
   void _onSelectedBranchChanged() {
-    // Reload products khi chi nhánh được chọn thay đổi
     if (_productService != null && authProvider.selectedBranchId != null) {
-      loadProducts();
+      _loadProductsWithMetadataCheck();
     }
   }
 
   /// Xử lý khi currentBranchId từ BranchProvider thay đổi
   void _onBranchChanged() {
-    // Reload products khi chi nhánh hiện tại thay đổi
     if (_productService != null && branchProvider?.currentBranchId != null) {
-      loadProducts();
-      notifyListeners(); // Thông báo để UI cập nhật tồn kho
+      _loadProductsWithMetadataCheck();
+      notifyListeners();
     }
   }
 

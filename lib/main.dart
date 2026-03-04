@@ -13,6 +13,7 @@ import 'controllers/product_provider.dart';
 import 'controllers/sales_provider.dart';
 import 'controllers/sales_return_provider.dart';
 import 'controllers/purchase_provider.dart';
+import 'controllers/transfer_provider.dart';
 import 'controllers/branch_provider.dart';
 import 'controllers/customer_provider.dart';
 import 'controllers/employee_group_provider.dart';
@@ -81,18 +82,22 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (context) => LocaleProvider()),
         ChangeNotifierProvider(create: (context) => AuthProvider()),
-        // AuthProvider phải đứng trước; ProductProvider nhận authProvider để isPro/user luôn khả dụng ngay khi khởi động.
-        ChangeNotifierProxyProvider<AuthProvider, ProductProvider>(
-          create: (context) => ProductProvider(
-            Provider.of<AuthProvider>(context, listen: false),
-          ),
-          update: (context, authProvider, previous) => ProductProvider(authProvider),
-        ),
+        // AuthProvider, BranchProvider phải đứng trước; ProductProvider nhận cả hai để reload khi đổi chi nhánh.
         ChangeNotifierProxyProvider<AuthProvider, BranchProvider>(
           create: (context) => BranchProvider(
             Provider.of<AuthProvider>(context, listen: false),
           ),
           update: (context, authProvider, previous) => BranchProvider(authProvider),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, ProductProvider>(
+          create: (context) => ProductProvider(
+            Provider.of<AuthProvider>(context, listen: false),
+            branchProvider: Provider.of<BranchProvider>(context, listen: false),
+          ),
+          update: (context, authProvider, previous) => ProductProvider(
+            authProvider,
+            branchProvider: Provider.of<BranchProvider>(context, listen: false),
+          ),
         ),
         ChangeNotifierProxyProvider<AuthProvider, SalesProvider>(
           create: (context) {
@@ -122,6 +127,16 @@ class MyApp extends StatelessWidget {
             Provider.of<AuthProvider>(context, listen: false),
           ),
           update: (context, authProvider, previous) => PurchaseProvider(authProvider),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, TransferProvider>(
+          create: (context) => TransferProvider(
+            Provider.of<AuthProvider>(context, listen: false),
+            Provider.of<BranchProvider>(context, listen: false),
+          ),
+          update: (context, authProvider, previous) => TransferProvider(
+            authProvider,
+            Provider.of<BranchProvider>(context, listen: false),
+          ),
         ),
         ChangeNotifierProxyProvider<AuthProvider, CustomerProvider>(
           create: (context) => CustomerProvider(

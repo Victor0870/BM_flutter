@@ -13,7 +13,7 @@ class TutorialKeys {
   /// Desktop: nút "BÁN HÀNG NGAY" trên header
   final GlobalKey keyDesktopSalesButton = GlobalKey();
 
-  /// ShopSettingsScreen: mục "Hướng dẫn sử dụng"
+  /// ShopSettingsScreen: mục "Hướng dẫn sử dụng" (fallback; ưu tiên key đăng ký từ màn hình đang hiển thị để tránh duplicate key).
   final GlobalKey keySettingsGuideTile = GlobalKey();
 }
 
@@ -24,6 +24,18 @@ class TutorialProvider with ChangeNotifier {
   }
 
   final TutorialManager _manager = TutorialManager();
+
+  /// Key do ShopSettingsScreen đăng ký theo instance — tránh "Multiple widgets used the same GlobalKey" khi có nhiều instance trong cây.
+  GlobalKey? _settingsGuideTileKey;
+  GlobalKey? get settingsGuideTileKey => _settingsGuideTileKey;
+  void registerSettingsGuideTileKey(GlobalKey key) {
+    _settingsGuideTileKey = key;
+    notifyListeners();
+  }
+  void clearSettingsGuideTileKey() {
+    _settingsGuideTileKey = null;
+    notifyListeners();
+  }
 
   bool _hasSeenWelcomePopup = false;
   bool _hasCompletedOverviewTour = false;

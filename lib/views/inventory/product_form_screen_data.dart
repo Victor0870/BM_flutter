@@ -44,6 +44,7 @@ class ProductFormParams {
     required this.onRemoveVariant,
     required this.onRemoveUnit,
     required this.requestRebuild,
+    this.onShowStockCard,
   });
 
   final GlobalKey<FormState> formKey;
@@ -88,6 +89,8 @@ class ProductFormParams {
   final void Function(int index) onRemoveUnit;
   /// Gọi sau khi đóng bottom sheet / thay đổi cần rebuild (mobile).
   final VoidCallback requestRebuild;
+  /// Mở thẻ kho (tồn kho theo chi nhánh). Chỉ có khi đang sửa sản phẩm (mobile).
+  final VoidCallback? onShowStockCard;
 
   String? get categoryName {
     if (selectedCategoryId == null) return null;

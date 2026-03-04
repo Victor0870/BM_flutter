@@ -63,9 +63,6 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            ndk {
-                debugSymbolLevel = "SYMBOL_TABLE"
-            }
         }
     }
 }

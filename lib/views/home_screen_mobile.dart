@@ -491,9 +491,9 @@ class HomeScreenMobile extends StatelessWidget {
               MaterialPageRoute<void>(
                 builder: (_) => const EmployeeManagementHubScreen(),
               ),
-            );
-          },
-        ),
+          );
+        },
+      ),
       _QuickActionButton(
         icon: Icons.bar_chart,
         label: 'Báo cáo',
@@ -507,6 +507,12 @@ class HomeScreenMobile extends StatelessWidget {
             ),
           );
         },
+      ),
+      _QuickActionButton(
+        icon: Icons.feedback_outlined,
+        label: 'Góp ý',
+        color: const Color(0xFF0D9488),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.feedback),
       ),
     ];
 

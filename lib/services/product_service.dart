@@ -59,6 +59,81 @@ class ProductService {
     return _firestore.collection('shops').doc(userId).collection('branches');
   }
 
+  /// Document metadata: lưu products_last_updated (Timestamp) — dùng cho "1 lượt đọc".
+  DocumentReference<Map<String, dynamic>> get _productsMetadataRef {
+    return _firestore.collection('shops').doc(userId).collection('metadata').doc('products');
+  }
+
+  static const String _keyLastProductsUpdated = 'last_products_updated';
+
+  /// Kiểm tra có cần tải lại danh sách sản phẩm từ Firestore không.
+  /// Chỉ đọc 1 document metadata, so sánh với thời gian lưu local.
+  /// Trả về (needUpdate: true nếu cần sync, serverLastUpdated: timestamp từ server khi needUpdate).
+  /// PRO + không phải web. Web / BASIC trả về (false, null).
+  Future<({bool needUpdate, DateTime? serverLastUpdated})> checkNeedUpdate() async {
+    if (kIsWeb || !isPro) {
+      return (needUpdate: false, serverLastUpdated: null);
+    }
+    try {
+      final doc = await _productsMetadataRef.get();
+      final data = doc.data();
+      final Timestamp? ts = data?['products_last_updated'] as Timestamp?;
+      final DateTime? serverTime = ts?.toDate();
+
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_keyLastProductsUpdated}_$userId';
+      final localMs = prefs.getInt(key);
+
+      if (serverTime == null) {
+        // Chưa có metadata trên server → cần sync (lần đầu hoặc migration)
+        return (needUpdate: true, serverLastUpdated: DateTime.now());
+      }
+      if (localMs == null) {
+        return (needUpdate: true, serverLastUpdated: serverTime);
+      }
+      final localTime = DateTime.fromMillisecondsSinceEpoch(localMs);
+      if (serverTime.isAfter(localTime)) {
+        return (needUpdate: true, serverLastUpdated: serverTime);
+      }
+      return (needUpdate: false, serverLastUpdated: null);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('checkNeedUpdate error: $e');
+      }
+      // Lỗi đọc metadata → an toàn là cho cần update
+      return (needUpdate: true, serverLastUpdated: null);
+    }
+  }
+
+  /// Lưu thời điểm cập nhật sản phẩm cuối (sau khi sync từ Cloud thành công).
+  Future<void> saveLastProductsUpdated(DateTime dateTime) async {
+    if (kIsWeb) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_keyLastProductsUpdated}_$userId';
+      await prefs.setInt(key, dateTime.millisecondsSinceEpoch);
+      if (kDebugMode) {
+        debugPrint('✅ saveLastProductsUpdated: $dateTime');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('saveLastProductsUpdated error: $e');
+    }
+  }
+
+  /// Cập nhật trường products_last_updated trên Firestore (gọi sau mỗi thao tác Thêm/Sửa/Xóa sản phẩm).
+  Future<void> _updateProductsMetadataTimestamp() async {
+    if (!isPro && !kIsWeb) return;
+    try {
+      await _productsMetadataRef.set({
+        'products_last_updated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('_updateProductsMetadataTimestamp error: $e');
+      }
+    }
+  }
+
   /// Lấy tất cả sản phẩm
   /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase
   /// Để có dữ liệu mới nhất, gọi syncAllFromCloud() trước
@@ -293,6 +368,7 @@ class ProductService {
     try {
       final docRef = _productsCollection.doc(product.id);
       await docRef.set(product.toFirestore());
+      await _updateProductsMetadataTimestamp();
       return docRef.id;
     } catch (e) {
       if (kDebugMode) {
@@ -347,6 +423,7 @@ class ProductService {
       }
       
       await _productsCollection.doc(product.id).update(product.toFirestore());
+      await _updateProductsMetadataTimestamp();
       
       if (kDebugMode) {
         debugPrint('✅ Product updated in Firestore successfully');
@@ -384,6 +461,7 @@ class ProductService {
           batch.set(ref, p.toFirestore(), SetOptions(merge: true));
         }
         await batch.commit();
+        await _updateProductsMetadataTimestamp();
       }
       if (!kIsWeb) {
         for (final p in chunk) {
@@ -564,6 +642,7 @@ class ProductService {
         'branchStock.$branchId': FieldValue.increment(quantityChange),
         'updatedAt': FieldValue.serverTimestamp(),
       });
+      await _updateProductsMetadataTimestamp();
       
       if (kDebugMode) {
         debugPrint('✅ Product stock incremented in Firestore: $productId, branchId=$branchId, change=$quantityChange');
@@ -614,6 +693,7 @@ class ProductService {
         'isActive': false,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+      await _updateProductsMetadataTimestamp();
       return 1;
     } catch (e) {
       if (kDebugMode) {
@@ -657,6 +737,7 @@ class ProductService {
   Future<int> _deleteProductPermanentlyFromFirestore(String id) async {
     try {
       await _productsCollection.doc(id).delete();
+      await _updateProductsMetadataTimestamp();
       return 1;
     } catch (e) {
       if (kDebugMode) {
@@ -1053,6 +1134,7 @@ class ProductService {
 
       // Commit batch
       await batch.commit();
+      await _updateProductsMetadataTimestamp();
 
       if (kDebugMode) {
         debugPrint('Migration completed: $successCount success, $errorCount errors');

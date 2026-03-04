@@ -842,17 +842,6 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
     }
   }
 
-  /// Toggle chọn/bỏ chọn hóa đơn
-  void _toggleSaleSelection(String saleId) {
-    setState(() {
-      if (_selectedSaleIds.contains(saleId)) {
-        _selectedSaleIds.remove(saleId);
-      } else {
-        _selectedSaleIds.add(saleId);
-      }
-    });
-  }
-
   /// Bỏ chọn tất cả
   void _clearSelection() {
     setState(() {
@@ -1166,7 +1155,6 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
           headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
           columnSpacing: 16,
           columns: const [
-            DataColumn(label: SizedBox(width: 40, child: Icon(Icons.check_box_outline_blank, size: 20))),
             DataColumn(label: Text('Mã đơn', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
             DataColumn(label: Text('Ngày bán', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
             DataColumn(label: Text('Khách hàng', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
@@ -1177,19 +1165,8 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
           ],
           rows: _sales.map((sale) {
             final isIssued = _isInvoiceIssued(sale);
-            final isSelected = _selectedSaleIds.contains(sale.id);
             return DataRow(
-              selected: isSelected,
-              onSelectChanged: !isIssued ? (v) => _toggleSaleSelection(sale.id) : null,
               cells: [
-                DataCell(
-                  !isIssued
-                      ? Checkbox(
-                          value: isSelected,
-                          onChanged: (v) => _toggleSaleSelection(sale.id),
-                        )
-                      : const SizedBox(width: 40),
-                ),
                 DataCell(
                   Text(
                     sale.id.length >= 8 ? sale.id.substring(0, 8).toUpperCase() : sale.id,
@@ -1268,29 +1245,6 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_selectedSaleIds.isNotEmpty) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _isBulkIssuing ? null : _bulkIssueInvoices,
-                          icon: _isBulkIssuing
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.send, size: 18),
-                          label: Text(_isBulkIssuing ? 'Đang phát hành...' : 'Phát hành (${_selectedSaleIds.length})'),
-                          style: FilledButton.styleFrom(backgroundColor: Colors.green),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton(onPressed: _clearSelection, child: const Text('Bỏ chọn')),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
                 _buildConnectionConfigCard(context),
                 const SizedBox(height: 12),
                 DateRangeFilter(
@@ -1423,7 +1377,6 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
       itemBuilder: (context, index) {
         final sale = _sales[index];
         final isIssued = _isInvoiceIssued(sale);
-        final isSelected = _selectedSaleIds.contains(sale.id);
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
           child: InkWell(
@@ -1436,11 +1389,6 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
                 children: [
                   Row(
                     children: [
-                      if (!isIssued)
-                        Checkbox(
-                          value: isSelected,
-                          onChanged: (v) => _toggleSaleSelection(sale.id),
-                        ),
                       Expanded(
                         child: Text(
                           sale.id.length >= 8 ? sale.id.substring(0, 8).toUpperCase() : sale.id,

@@ -87,7 +87,12 @@ class _NotificationPopupContentState extends State<_NotificationPopupContent>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _tabController.addListener(() => setState(() {}));
+    _tabController.addListener(() {
+      // Defer setState to avoid '!_debugDuringDeviceUpdate' assertion (mouse_tracker.dart)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    });
   }
 
   @override

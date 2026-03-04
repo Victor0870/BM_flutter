@@ -336,10 +336,14 @@ class SalesService {
     }
   }
 
-  /// Thêm đơn hàng vào Firestore
+  /// Thêm đơn hàng vào Firestore và tăng bộ đếm tổng số hóa đơn của shop (cho admin xem mức độ hoạt động)
   Future<void> _addSaleToFirestore(SaleModel sale) async {
     try {
       await _salesCollection.doc(sale.id).set(sale.toFirestore());
+      await _firestore.collection('shops').doc(userId).update({
+        'totalSalesCount': FieldValue.increment(1),
+        'updatedAt': Timestamp.now(),
+      });
     } catch (e) {
       if (kDebugMode) {
         debugPrint('Error adding sale to Firestore: $e');

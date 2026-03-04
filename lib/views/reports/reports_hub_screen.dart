@@ -16,44 +16,75 @@ class ReportsHubScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(AppLocalizations.of(context)!.reports),
       ),
-      body: Center(
-        child: isMobile ? _buildMobileGrid(context) : _buildDesktopGrid(context),
-      ),
+      body: isMobile
+          ? _buildMobileGrid(context)
+          : Center(child: _buildDesktopGrid(context)),
     );
   }
 
   Widget _buildMobileGrid(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            AppLocalizations.of(context)!.selectReportType,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF64748B),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _ReportCard(
-            icon: Icons.trending_up,
-            title: AppLocalizations.of(context)!.salesReport,
-            subtitle: AppLocalizations.of(context)!.revenueReportSubtitle,
-            color: const Color(0xFF0EA5E9),
-            onTap: () => Navigator.pushNamed(context, AppRoutes.salesReport),
-          ),
-          const SizedBox(height: 16),
-          _ReportCard(
-            icon: Icons.savings,
-            title: AppLocalizations.of(context)!.profitReport,
-            subtitle: AppLocalizations.of(context)!.profitReportSubtitle,
-            color: const Color(0xFF059669),
-            onTap: () => Navigator.pushNamed(context, AppRoutes.profitReport),
-          ),
-        ],
+    final l10n = AppLocalizations.of(context)!;
+    final reportTiles = <Widget>[
+      _ReportQuickTile(
+        icon: Icons.trending_up,
+        label: l10n.salesReport,
+        color: const Color(0xFF0EA5E9),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.salesReport),
       ),
+      _ReportQuickTile(
+        icon: Icons.savings,
+        label: l10n.profitReport,
+        color: const Color(0xFF059669),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.profitReport),
+      ),
+      _ReportQuickTile(
+        icon: Icons.swap_vert,
+        label: l10n.stockMovementReport,
+        color: const Color(0xFF8B5CF6),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.stockMovementReport),
+      ),
+      _ReportQuickTile(
+        icon: Icons.reply_all,
+        label: l10n.salesReturnReport,
+        color: const Color(0xFFF59E0B),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.salesReturnReport),
+      ),
+      _ReportQuickTile(
+        icon: Icons.inventory_2_outlined,
+        label: l10n.lowStockReport,
+        color: const Color(0xFFEF4444),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.lowStockReport),
+      ),
+      _ReportQuickTile(
+        icon: Icons.schedule,
+        label: l10n.expiryReport,
+        color: const Color(0xFF0D9488),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.expiryReport),
+      ),
+    ];
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      children: [
+        Text(
+          l10n.selectReportType,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+        const SizedBox(height: 12),
+        GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.05,
+          children: reportTiles,
+        ),
+      ],
     );
   }
 
@@ -98,6 +129,72 @@ class ReportsHubScreen extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Ô báo cáo dạng thao tác nhanh (mobile): nền trắng, viền, icon màu, label.
+class _ReportQuickTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ReportQuickTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
     );

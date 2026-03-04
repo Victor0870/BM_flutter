@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../controllers/purchase_provider.dart';
@@ -27,11 +28,13 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
   final TextEditingController _barcodeController = TextEditingController();
   final TextEditingController _supplierNameController = TextEditingController();
+  final TextEditingController _searchHeaderController = TextEditingController();
 
   @override
   void dispose() {
     _barcodeController.dispose();
     _supplierNameController.dispose();
+    _searchHeaderController.dispose();
     super.dispose();
   }
 
@@ -311,25 +314,621 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     );
   }
 
+  static const Color _bluePrimary = Color(0xFF2563EB);
+  static const Color _blueLight = Color(0xFFEFF6FF);
+
+  Widget _buildMobileModernForm(BuildContext context) {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: _blueLight,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.inventory_2_outlined, size: 26, color: _bluePrimary),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Nhập kho',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Nhà cung cấp, chi nhánh và quét mã vạch',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          _buildMobileLabel('Nhà cung cấp *'),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _supplierNameController,
+            decoration: _mobileInputDecoration('Nhập tên nhà cung cấp'),
+            onChanged: (value) => context.read<PurchaseProvider>().setSupplierName(value),
+          ),
+          const SizedBox(height: 18),
+          _buildMobileLabel('Chi nhánh nhập *'),
+          const SizedBox(height: 6),
+          Consumer2<AuthProvider, BranchProvider>(
+            builder: (context, authProvider, branchProvider, _) {
+              final isPro = authProvider.isPro;
+              final branches = branchProvider.branches.where((b) => b.isActive).toList();
+              // Basic: chỉ Cửa hàng chính. Pro: chọn được; chưa có thêm chi nhánh thì mặc định Cửa hàng chính.
+              final selectedBranchId = authProvider.selectedBranchId ?? branchProvider.currentBranchId ?? kMainStoreBranchId;
+              final effectiveId = isPro
+                  ? (branches.any((b) => b.id == selectedBranchId)
+                      ? selectedBranchId
+                      : (branches.isNotEmpty ? branches.first.id : kMainStoreBranchId))
+                  : kMainStoreBranchId;
+              final displayName = effectiveId == kMainStoreBranchId
+                  ? 'Cửa hàng chính'
+                  : (branches.where((b) => b.id == effectiveId).firstOrNull?.name ?? 'Cửa hàng chính');
+              // Bản Basic: không cho chọn chi nhánh; Pro: mở bottom sheet chọn (hoặc chỉ hiển thị nếu chỉ có 1 chi nhánh).
+              final canTap = isPro && branches.isNotEmpty;
+              return InkWell(
+                onTap: canTap
+                    ? () => _showMobileBranchPicker(
+                          context,
+                          branches: branches,
+                          currentId: effectiveId,
+                          onSelect: (branchId) async {
+                            await authProvider.setSelectedBranchId(branchId);
+                            await branchProvider.setSelectedBranch(branchId);
+                          },
+                        )
+                    : null,
+                borderRadius: BorderRadius.circular(12),
+                child: InputDecorator(
+                  decoration: _mobileInputDecoration('Chọn chi nhánh').copyWith(
+                    prefixIcon: const Icon(Icons.store_outlined, size: 22, color: Color(0xFF64748B)),
+                    suffixIcon: canTap ? const Icon(Icons.keyboard_arrow_down, color: Color(0xFF64748B)) : null,
+                  ),
+                  child: Text(
+                    displayName,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: const Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          _buildMobileLabel('Mã vạch'),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _barcodeController,
+            decoration: _mobileInputDecoration('Nhập hoặc quét mã vạch').copyWith(
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.qr_code_scanner, color: _bluePrimary),
+                onPressed: _scanBarcode,
+                tooltip: 'Quét mã vạch',
+              ),
+            ),
+            onSubmitted: _searchAndAddProduct,
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton.icon(
+              onPressed: _showProductSelection,
+              icon: const Icon(Icons.list_alt, size: 22),
+              label: const Text('Chọn sản phẩm từ danh sách', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              style: FilledButton.styleFrom(
+                backgroundColor: _bluePrimary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMobileBranchPicker(
+    BuildContext context, {
+    required List<BranchModel> branches,
+    required String currentId,
+    required Future<void> Function(String branchId) onSelect,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Chọn chi nhánh nhập',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Đóng'),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                  itemCount: branches.length,
+                  itemBuilder: (_, i) {
+                    final b = branches[i];
+                    final name = b.id == kMainStoreBranchId ? 'Cửa hàng chính' : b.name;
+                    final isSelected = b.id == currentId;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        name,
+                        style: TextStyle(
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: isSelected ? _bluePrimary : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_rounded, color: _bluePrimary, size: 22)
+                          : null,
+                      onTap: () async {
+                        await onSelect(b.id);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileLabel(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w500,
+        color: Color(0xFF475569),
+      ),
+    );
+  }
+
+  InputDecoration _mobileInputDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _bluePrimary, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  /// Giao diện desktop theo ảnh minh họa: header (back, title, search, icons, nhân viên, ngày giờ) + bảng trái + sidebar phải.
+  Widget _buildDesktopLayout(BuildContext context) {
+    final authProvider = context.watch<AuthProvider>();
+    final employeeName = authProvider.userProfile?.displayName ?? authProvider.user?.email?.split('@').first ?? 'Nhân viên';
+    final now = DateTime.now();
+
+    return Column(
+      children: [
+        // Header
+        Material(
+          elevation: 0,
+          color: Colors.white,
+          child: Container(
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => Navigator.of(context).pop(),
+                  tooltip: 'Quay lại',
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Nhập hàng',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                ),
+                const SizedBox(width: 24),
+                SizedBox(
+                  width: 200,
+                  child: TextField(
+                    controller: _searchHeaderController,
+                    decoration: InputDecoration(
+                      hintText: 'Q KH',
+                      hintStyle: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                      prefixIcon: Icon(Icons.search, size: 20, color: Colors.grey.shade600),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(icon: const Icon(Icons.dehaze), onPressed: () {}, tooltip: 'Xem'),
+                IconButton(icon: const Icon(Icons.dehaze), onPressed: () {}, tooltip: 'Xem'),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _showProductSelection,
+                  tooltip: 'Thêm sản phẩm',
+                ),
+                const Spacer(),
+                IconButton(icon: const Icon(Icons.print_outlined), onPressed: () {}, tooltip: 'In'),
+                IconButton(icon: const Icon(Icons.visibility_outlined), onPressed: () {}, tooltip: 'Xem'),
+                IconButton(icon: const Icon(Icons.info_outline), onPressed: () {}, tooltip: 'Thông tin'),
+                const SizedBox(width: 16),
+                Text(
+                  employeeName.length > 12 ? '${employeeName.substring(0, 12)}...' : employeeName,
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  DateFormat('dd/MM/yyyy HH:mm').format(now),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const Divider(height: 1),
+        // Body: bảng trái + sidebar phải
+        Expanded(
+          child: Consumer<PurchaseProvider>(
+            builder: (context, purchaseProvider, _) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _buildDesktopTable(context, purchaseProvider)),
+                  SizedBox(width: 360, child: _buildDesktopSidebar(context, purchaseProvider)),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopTable(BuildContext context, PurchaseProvider purchaseProvider) {
+    final productProvider = context.read<ProductProvider>();
+    if (purchaseProvider.isCartEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            Text(
+              'Chưa có mặt hàng nào',
+              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _showProductSelection,
+              icon: const Icon(Icons.add),
+              label: const Text('Thêm mặt hàng'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: DataTable(
+          headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
+          columnSpacing: 16,
+          columns: const [
+            DataColumn(label: SizedBox(width: 40)),
+            DataColumn(label: Text('STT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+            DataColumn(label: Text('Mã hàng', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+            DataColumn(label: Text('Tên hàng', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+            DataColumn(label: Text('ĐVT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+            DataColumn(label: Text('Số lượng', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), numeric: true),
+            DataColumn(label: Text('Đơn giá', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), numeric: true),
+            DataColumn(label: Text('Giảm giá', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), numeric: true),
+            DataColumn(label: Text('Thành tiền', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), numeric: true),
+          ],
+          rows: List.generate(purchaseProvider.cartItems.length, (index) {
+            final item = purchaseProvider.cartItems[index];
+            final stt = index + 1;
+            ProductModel? product;
+            for (final p in productProvider.products) {
+              if (p.id == item.productId) { product = p; break; }
+            }
+            final unitName = product?.units.isNotEmpty == true ? product!.units.first.unitName : 'cái';
+            final code = (product?.code?.isNotEmpty == true ? product!.code! : item.productId);
+            final displayCode = code.length > 14 ? '${code.substring(0, 14)}...' : code;
+            final productForDialog = product ?? ProductModel(
+              id: item.productId,
+              name: item.productName,
+              units: [UnitConversion(id: '1', unitName: 'cái', conversionValue: 1, price: 0)],
+              branchPrices: {'default': 0},
+              importPrice: item.importPrice,
+              branchStock: {'default': 0},
+            );
+            return DataRow(
+              cells: [
+                DataCell(
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                    onPressed: () => purchaseProvider.removeFromCart(item.productId),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 40),
+                  ),
+                ),
+                DataCell(Text('$stt', style: const TextStyle(fontSize: 13))),
+                DataCell(
+                  GestureDetector(
+                    onTap: () => _showPurchaseItemDialog(productForDialog),
+                    child: Text(displayCode, style: const TextStyle(fontSize: 13, color: Color(0xFF2563EB), fontWeight: FontWeight.w500)),
+                  ),
+                ),
+                DataCell(
+                  SizedBox(
+                    width: 220,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(child: Text(item.productName, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
+                            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade600),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text('Ghi chú...', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                      ],
+                    ),
+                  ),
+                ),
+                DataCell(Text(unitName, style: const TextStyle(fontSize: 13))),
+                DataCell(
+                  GestureDetector(
+                    onTap: () => _showPurchaseItemDialog(productForDialog),
+                    child: Text(item.quantity.toStringAsFixed(0), style: const TextStyle(fontSize: 13)),
+                  ),
+                ),
+                DataCell(
+                  GestureDetector(
+                    onTap: () => _showPurchaseItemDialog(productForDialog),
+                    child: Text(_formatPrice(item.importPrice), style: const TextStyle(fontSize: 13)),
+                  ),
+                ),
+                DataCell(Text('0', style: const TextStyle(fontSize: 13))),
+                DataCell(Text(_formatPrice(item.subtotal), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+              ],
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopSidebar(BuildContext context, PurchaseProvider purchaseProvider) {
+    return Container(
+      color: Colors.grey.shade50,
+      padding: const EdgeInsets.all(16),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _supplierNameController,
+              decoration: InputDecoration(
+                hintText: 'Tìm nhà cung cấp',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: IconButton(icon: const Icon(Icons.add), onPressed: () {}, tooltip: 'Thêm nhà cung cấp'),
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+              onChanged: (v) => purchaseProvider.setSupplierName(v),
+            ),
+            const SizedBox(height: 16),
+            _sidebarLabel('Mã phiếu nhập'),
+            const SizedBox(height: 4),
+            Text('Mã phiếu tự động', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+            const SizedBox(height: 12),
+            _sidebarLabel('Mã đặt hàng nhập'),
+            const SizedBox(height: 4),
+            TextField(
+              decoration: InputDecoration(
+                hintText: 'Nhập mã đặt hàng',
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _sidebarLabel('Trạng thái'),
+            const SizedBox(height: 4),
+            Text('Phiếu tạm', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+            const SizedBox(height: 12),
+            _sidebarLabel('Tổng tiền hàng'),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                if (purchaseProvider.cartItemCount > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.blue.shade100, borderRadius: BorderRadius.circular(4)),
+                    child: Text('${purchaseProvider.cartItemCount}', style: TextStyle(fontSize: 12, color: Colors.blue.shade800)),
+                  ),
+                const SizedBox(width: 8),
+                Text(_formatPrice(purchaseProvider.cartTotal), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _sidebarLabel('Giảm giá'),
+            const SizedBox(height: 4),
+            Text('0', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+            const SizedBox(height: 12),
+            _sidebarLabel('Cần trả nhà cung cấp'),
+            const SizedBox(height: 4),
+            Text(_formatPrice(purchaseProvider.cartTotal), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF2563EB))),
+            const SizedBox(height: 12),
+            _sidebarLabel('Tiền trả nhà cung cấp (F8)'),
+            const SizedBox(height: 4),
+            TextField(
+              decoration: InputDecoration(
+                hintText: '0',
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 12),
+            _sidebarLabel('Ghi chú'),
+            const SizedBox(height: 4),
+            TextField(
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: 'Ghi chú phiếu nhập',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 44,
+              child: FilledButton.icon(
+                onPressed: purchaseProvider.isLoading ? null : () => _handleSavePurchase(complete: false),
+                icon: const Icon(Icons.save, size: 20),
+                label: const Text('Lưu tạm'),
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 44,
+              child: FilledButton.icon(
+                onPressed: purchaseProvider.isLoading ? null : () => _handleSavePurchase(complete: true),
+                icon: const Icon(Icons.check, size: 20),
+                label: const Text('Hoàn thành'),
+                style: FilledButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sidebarLabel(String text) {
+    return Text(
+      text,
+      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!_useMobileLayout) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: _buildDesktopLayout(context),
+      );
+    }
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Nhập kho'),
+        title: Text(
+          'Nhập kho',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: _useMobileLayout ? const Color(0xFF1E293B) : null,
+          ),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1E293B),
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
-          if (!_useMobileLayout)
-            IconButton(
-              icon: const Icon(Icons.home),
-              onPressed: () {
-                Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-              },
-              tooltip: 'Về trang chủ',
-            ),
           IconButton(
-            icon: const Icon(Icons.history),
-            onPressed: () {
-              Navigator.pushNamed(context, '/purchase-history');
-            },
+            icon: const Icon(Icons.history_outlined, size: 22),
+            onPressed: () => Navigator.pushNamed(context, '/purchase-history'),
             tooltip: 'Lịch sử nhập kho',
           ),
         ],
@@ -346,6 +945,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final isNarrow = constraints.maxWidth < kBreakpointMobile;
+                      if (isNarrow) return _buildMobileModernForm(context);
                       return Container(
                         padding: const EdgeInsets.all(16),
                         color: Colors.grey[100],
@@ -367,20 +967,41 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  // Chi nhánh nhập kho
+                  // Chi nhánh nhập kho: Basic = chỉ Cửa hàng chính; Pro = chọn được, mặc định Cửa hàng chính nếu chưa có thêm chi nhánh
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Consumer2<AuthProvider, BranchProvider>(
                       builder: (context, authProvider, branchProvider, child) {
+                        final isPro = authProvider.isPro;
                         final branches = branchProvider.branches
                             .where((b) => b.isActive)
                             .toList();
-                        final selectedBranchId = authProvider.selectedBranchId;
+                        final selectedBranchId = authProvider.selectedBranchId ?? branchProvider.currentBranchId ?? kMainStoreBranchId;
+                        final effectiveId = isPro && branches.any((b) => b.id == selectedBranchId)
+                            ? selectedBranchId
+                            : (branches.isNotEmpty ? branches.first.id : kMainStoreBranchId);
+                        final hasValue = branches.any((b) => b.id == effectiveId);
+                        final showDropdown = isPro && branches.isNotEmpty;
 
+                        if (!showDropdown) {
+                          return SizedBox(
+                            width: isNarrow ? double.infinity : 320,
+                            child: InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: 'Chi nhánh nhập *',
+                                prefixIcon: const Icon(Icons.store),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text('Cửa hàng chính', style: TextStyle(fontSize: 16)),
+                            ),
+                          );
+                        }
                         return SizedBox(
                           width: isNarrow ? double.infinity : 320,
                           child: DropdownButtonFormField<String?>(
-                            initialValue: selectedBranchId,
+                            initialValue: hasValue ? effectiveId : (branches.isNotEmpty ? branches.first.id : null),
                             decoration: InputDecoration(
                               labelText: 'Chi nhánh nhập *',
                               prefixIcon: const Icon(Icons.store),
@@ -388,18 +1009,15 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            items: [
-                              // Không có option "Không có" nữa, mặc định là "Cửa hàng chính"
-                              ...branches.map(
-                                (branch) => DropdownMenuItem<String?>(
-                                  value: branch.id,
-                                  child: Text(branch.name),
-                                ),
+                            items: branches.map(
+                              (branch) => DropdownMenuItem<String?>(
+                                value: branch.id,
+                                child: Text(branch.id == kMainStoreBranchId ? 'Cửa hàng chính' : branch.name),
                               ),
-                            ],
+                            ).toList(),
                             onChanged: (value) {
-                              // Nếu value null, mặc định là "Cửa hàng chính"
                               authProvider.setSelectedBranchId(value ?? kMainStoreBranchId);
+                              branchProvider.setSelectedBranch(value ?? kMainStoreBranchId);
                             },
                           ),
                         );

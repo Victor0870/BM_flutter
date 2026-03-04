@@ -56,6 +56,11 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // Rules cho subcollection branches của shop (chi nhánh)
+      match /branches/{branchId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // Rules cho subcollection customers của shop (danh sách KH, chi tiết, popup sửa)
       match /customers/{customerId} {
         allow read, write: if isOwner(userId);
@@ -69,6 +74,19 @@ service cloud.firestore {
       // Rules cho subcollection employee_groups của shop
       match /employee_groups/{groupId} {
         allow read, write: if isOwner(userId);
+      }
+
+      // Metadata file Excel KiotViet (Data base danganh.xlsx) — chỉ owner, dùng khi syncWithKiotViet
+      match /kiotVietFile/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Nội dung Excel KiotViet đã parse: meta + từng sheet (doc) + rows (subcollection) — chỉ owner
+      match /kiotVietData/{docId} {
+        allow read, write: if isOwner(userId);
+        match /rows/{rowId} {
+          allow read, write: if isOwner(userId);
+        }
       }
     }
 
@@ -106,6 +124,25 @@ service cloud.firestore {
     match /system_settings/{docId} {
       allow read: if isSignedIn();
       allow write: if false;
+    }
+
+    // global_parts_catalog: danh mục phụ tùng (upload 1 lần rồi xóa tính năng)
+    // Sau khi sửa file này, nhớ chạy: firebase deploy --only firestore:rules
+    match /global_parts_catalog/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // feedback: góp ý từ user (root collection). User tạo và đọc theo shopId; Admin đọc tất cả và cập nhật (phản hồi).
+    match /feedback/{feedbackId} {
+      allow read: if isSignedIn() && (
+        resource.data.shopId == request.auth.uid
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId
+        || isAdmin()
+      );
+      allow create: if isSignedIn() && request.resource.data.shopId is string && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     // Deny tất cả các truy cập khác

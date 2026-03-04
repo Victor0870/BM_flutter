@@ -14,7 +14,7 @@ class MoreScreen extends StatelessWidget {
 
   const MoreScreen({super.key, this.forceMobile});
 
-  static const String _appVersion = '2.0.4';
+  static const String _appVersion = '2.0.6';
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +46,8 @@ class MoreScreen extends StatelessWidget {
                 _MenuItem(icon: Icons.inventory_2, label: l10n.productList, onTap: () => Navigator.pushNamed(context, AppRoutes.inventory)),
                 _MenuItem(icon: Icons.checklist, label: l10n.inventoryCheck, onTap: () => Navigator.pushNamed(context, AppRoutes.stockOverview)),
                 _MenuItem(icon: Icons.add_shopping_cart, label: l10n.goodsReceipt, onTap: () => Navigator.pushNamed(context, AppRoutes.purchase)),
-                _MenuItem(icon: Icons.local_shipping, label: l10n.transferStock, onTap: () => Navigator.pushNamed(context, AppRoutes.transferStock)),
+                if (context.watch<AuthProvider>().isPro && context.watch<BranchProvider>().branches.where((b) => b.isActive).length >= 2)
+                  _MenuItem(icon: Icons.local_shipping, label: l10n.transferStock, onTap: () => Navigator.pushNamed(context, AppRoutes.transferStock)),
               ],
               crossAxisCount: 2,
             ),
@@ -95,7 +96,7 @@ class MoreScreen extends StatelessWidget {
                   context,
                   title: l10n.taxAndAccounting,
                   items: [
-                    _MenuItem(icon: Icons.receipt, label: l10n.eInvoice, onTap: () => Navigator.pushNamed(context, AppRoutes.electronicInvoice)),
+                    _MenuItem(icon: Icons.receipt, label: l10n.eInvoice, onTap: () => Navigator.pushNamed(context, AppRoutes.einvoiceSettings)),
                   ],
                   crossAxisCount: 1,
                 ),
@@ -117,18 +118,14 @@ class MoreScreen extends StatelessWidget {
   Widget _buildStoreCard(BuildContext context, AppLocalizations l10n) {
     final auth = context.watch<AuthProvider>();
     final branchProvider = context.watch<BranchProvider>();
-    final branches = branchProvider.branches;
+    final branches = branchProvider.branches.where((b) => b.isActive).toList();
     final currentId = branchProvider.currentBranchId;
-    BranchModel? branch;
-    if (branches.isNotEmpty) {
-      try {
-        branch = currentId != null ? branches.firstWhere((b) => b.id == currentId) : branches.first;
-      } catch (_) {
-        branch = branches.first;
-      }
-    }
-    final branchName = branch?.name ?? '';
     final displayName = auth.userProfile?.displayName ?? auth.user?.email?.split('@').first ?? '';
+    final isStaffWithFixedBranch = auth.userProfile != null &&
+        auth.userProfile!.isStaff &&
+        (auth.userProfile!.workingBranchId != null && auth.userProfile!.workingBranchId!.isNotEmpty);
+    final effectiveBranchId = isStaffWithFixedBranch ? auth.userProfile!.workingBranchId! : currentId;
+    final branchName = _getBranchDisplayName(context, branches, effectiveBranchId);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -156,14 +153,41 @@ class MoreScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(displayName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(branchName, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-                        const SizedBox(width: 4),
-                        Icon(Icons.keyboard_arrow_down, size: 18, color: Colors.grey[600]),
-                      ],
-                    ),
+                    if ((auth.user?.email ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        auth.user!.email!,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Text(l10n.branchLabel, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    if (isStaffWithFixedBranch)
+                      Row(
+                        children: [
+                          Text(branchName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Color(0xFF1E293B))),
+                          const SizedBox(width: 4),
+                          Icon(Icons.store, size: 16, color: Colors.grey[600]),
+                        ],
+                      )
+                    else
+                      InkWell(
+                        onTap: () => _showBranchPicker(context, branchProvider, branches),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(branchName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Color(0xFF1E293B))),
+                              ),
+                              Icon(Icons.keyboard_arrow_down, size: 20, color: Colors.grey[600]),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -177,15 +201,15 @@ class MoreScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           InkWell(
-            onTap: () => Navigator.pushNamed(context, AppRoutes.shopSettings),
+            onTap: () => Navigator.pushNamed(context, AppRoutes.accountPackage),
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 children: [
-                  Icon(Icons.store, size: 20, color: Colors.grey[700]),
+                  Icon(Icons.person_outline, size: 20, color: Colors.grey[700]),
                   const SizedBox(width: 10),
-                  Text(l10n.shopInfo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                  Text(l10n.accountInfo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                   const Spacer(),
                   Icon(Icons.chevron_right, size: 20, color: Colors.grey[600]),
                 ],
@@ -195,6 +219,72 @@ class MoreScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  static String _getBranchDisplayName(BuildContext context, List<BranchModel> branches, String? branchId) {
+    if (branchId == null || branchId.isEmpty) {
+      return AppLocalizations.of(context)!.mainBranch;
+    }
+    if (branchId == kMainStoreBranchId) {
+      return AppLocalizations.of(context)!.mainBranch;
+    }
+    try {
+      final b = branches.firstWhere((e) => e.id == branchId);
+      return b.name;
+    } catch (_) {
+      return AppLocalizations.of(context)!.mainBranch;
+    }
+  }
+
+  static Future<void> _showBranchPicker(
+    BuildContext context,
+    BranchProvider branchProvider,
+    List<BranchModel> branches,
+  ) async {
+    final l10n = AppLocalizations.of(context)!;
+    final currentId = branchProvider.currentBranchId;
+    if (context.mounted) {
+      await showModalBottomSheet<void>(
+        context: context,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        builder: (ctx) {
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(l10n.chooseBranch, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ),
+                if (branches.isEmpty)
+                  ListTile(
+                    leading: Icon(Icons.store, color: Theme.of(ctx).colorScheme.primary),
+                    title: Text(l10n.mainBranch),
+                    onTap: () {
+                      branchProvider.setSelectedBranch(kMainStoreBranchId);
+                      Navigator.pop(ctx);
+                    },
+                  )
+                else
+                  ...branches.map((b) {
+                    final name = b.id == kMainStoreBranchId ? l10n.mainBranch : b.name;
+                    final isSelected = currentId == b.id;
+                    return ListTile(
+                      leading: Icon(isSelected ? Icons.check_circle : Icons.store_outlined, color: isSelected ? Theme.of(ctx).colorScheme.primary : null),
+                      title: Text(name),
+                      onTap: () {
+                        branchProvider.setSelectedBranch(b.id);
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  }),
+                const SizedBox(height: 16),
+              ],
+            ),
+          );
+        },
+      );
+    }
   }
 
   Widget _buildSection(
@@ -319,8 +409,10 @@ class MoreScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          _buildListTile(context, _MenuItem(icon: Icons.settings, label: l10n.storeSetup, onTap: () => Navigator.pushNamed(context, AppRoutes.shopSettings))),
-          _buildListTile(context, _MenuItem(icon: Icons.language, label: l10n.language, onTap: () => Navigator.pushNamed(context, AppRoutes.shopSettings))),
+          _buildListTile(context, _MenuItem(icon: Icons.settings, label: l10n.storeSetup, onTap: () => Navigator.pushNamed(context, AppRoutes.storeSetup))),
+          _buildListTile(context, _MenuItem(icon: Icons.print_outlined, label: l10n.printerConfig, onTap: () => Navigator.pushNamed(context, AppRoutes.printerSettings))),
+          _buildListTile(context, _MenuItem(icon: Icons.language, label: l10n.language, onTap: () => Navigator.pushNamed(context, AppRoutes.languageSettings))),
+          _buildListTile(context, _MenuItem(icon: Icons.feedback_outlined, label: 'Góp ý cho phần mềm', onTap: () => Navigator.pushNamed(context, AppRoutes.feedback))),
           _buildListTile(context, _MenuItem(icon: Icons.help_outline, label: l10n.userGuide, onTap: () {})),
           _buildListTile(
             context,

@@ -12,6 +12,9 @@ const double _kShadowOpacity = 0.04;
 const double _kPadding = 16;
 const double _kImageSize = 72;
 
+const Color _bluePrimary = Color(0xFF2563EB);
+const Color _blueLight = Color(0xFFEFF6FF);
+
 /// Giao diện form thêm/sửa sản phẩm cho Mobile: layout card, section "Sửa", bottom bar.
 class ProductFormScreenMobile extends StatelessWidget {
   const ProductFormScreenMobile({super.key, required this.params});
@@ -30,7 +33,7 @@ class ProductFormScreenMobile extends StatelessWidget {
     final primary = theme.colorScheme.primary;
 
     return ColoredBox(
-      color: Colors.grey.shade50,
+      color: Colors.white,
       child: Column(
         children: [
           Expanded(
@@ -186,11 +189,35 @@ class ProductFormScreenMobile extends StatelessWidget {
             children: [
               Expanded(child: _colLabelValue('Nhóm hàng', categoryName)),
               Expanded(
-                child: Row(
-                  children: [
-                    _colLabelValue('Tồn kho', stock),
-                    Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
-                  ],
+                child: InkWell(
+                  onTap: params.onShowStockCard != null ? () => params.onShowStockCard!() : null,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _colLabelValue('Tồn kho', stock),
+                        if (params.onShowStockCard != null)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Sửa',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: primary,
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
+                            ],
+                          )
+                        else
+                          Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -247,6 +274,43 @@ class ProductFormScreenMobile extends StatelessWidget {
     );
   }
 
+  InputDecoration _sheetInputDecoration(String hint, {Widget? suffixIcon}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      suffixIcon: suffixIcon,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _bluePrimary, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  Widget _sheetLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: Color(0xFF475569),
+        ),
+      ),
+    );
+  }
+
   void _showBasicInfoSheet(BuildContext context) {
     final productProvider = context.read<ProductProvider>();
     showModalBottomSheet(
@@ -254,7 +318,7 @@ class ProductFormScreenMobile extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.85,
+        initialChildSize: 0.9,
         minChildSize: 0.5,
         maxChildSize: 0.95,
         builder: (_, scrollController) => Container(
@@ -264,80 +328,117 @@ class ProductFormScreenMobile extends StatelessWidget {
           ),
           child: ListView(
             controller: scrollController,
-            padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewPadding.bottom),
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + MediaQuery.of(context).viewPadding.bottom),
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Thông tin cơ bản', style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Xong')),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: _blueLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.inventory_2_outlined, size: 24, color: _bluePrimary),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Thông tin cơ bản',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _bluePrimary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    child: const Text('Xong'),
+                  ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
+              _sheetLabel('Tên sản phẩm *'),
               TextFormField(
                 controller: params.nameController,
-                decoration: const InputDecoration(labelText: 'Tên sản phẩm *', border: OutlineInputBorder()),
+                decoration: _sheetInputDecoration('Nhập tên sản phẩm'),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Vui lòng nhập tên' : null,
                 onChanged: (_) => params.requestRebuild(),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              _sheetLabel('Đơn vị tính *'),
               TextFormField(
                 controller: params.unitController,
-                decoration: const InputDecoration(labelText: 'Đơn vị tính *', border: OutlineInputBorder()),
+                decoration: _sheetInputDecoration('VD: cái, hộp'),
                 onChanged: (_) => params.requestRebuild(),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              _sheetLabel('Mã hàng (SKU)'),
               TextFormField(
                 controller: params.skuController,
-                decoration: const InputDecoration(labelText: 'Mã hàng (SKU)', border: OutlineInputBorder()),
+                decoration: _sheetInputDecoration('Tùy chọn'),
                 onChanged: (_) => params.requestRebuild(),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              _sheetLabel('Mã vạch'),
               TextFormField(
                 controller: params.barcodeController,
-                decoration: InputDecoration(
-                  labelText: 'Mã vạch',
-                  border: const OutlineInputBorder(),
+                decoration: _sheetInputDecoration(
+                  'Nhập hoặc quét',
                   suffixIcon: IconButton(
-                    icon: const Icon(Icons.qr_code_scanner),
+                    icon: const Icon(Icons.qr_code_scanner, color: _bluePrimary),
                     onPressed: params.onScanBarcode,
                   ),
                 ),
                 onChanged: (_) => params.requestRebuild(),
               ),
               if (params.enableCostPrice) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 18),
+                _sheetLabel('Giá vốn'),
                 TextFormField(
                   controller: params.importPriceController,
-                  decoration: const InputDecoration(labelText: 'Giá vốn', suffixText: 'đ', border: OutlineInputBorder()),
+                  decoration: _sheetInputDecoration('0').copyWith(suffixText: 'đ'),
                   keyboardType: TextInputType.number,
                   onChanged: (_) => params.requestRebuild(),
                 ),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              _sheetLabel('Giá bán *'),
               TextFormField(
                 controller: params.priceController,
-                decoration: const InputDecoration(labelText: 'Giá bán *', suffixText: 'đ', border: OutlineInputBorder()),
+                decoration: _sheetInputDecoration('0').copyWith(suffixText: 'đ'),
                 keyboardType: TextInputType.number,
                 onChanged: (_) => params.requestRebuild(),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
+              const SizedBox(height: 18),
+              _sheetLabel('Nhóm hàng'),
+              DropdownButtonFormField<String?>(
                 initialValue: params.selectedCategoryId,
-                decoration: const InputDecoration(labelText: 'Nhóm hàng', border: OutlineInputBorder()),
+                decoration: _sheetInputDecoration('Chọn nhóm hàng').copyWith(
+                  suffixIcon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF64748B)),
+                ),
                 items: [
-                  const DropdownMenuItem(value: null, child: Text('Không chọn')),
-                  ...productProvider.categories.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))),
+                  const DropdownMenuItem<String?>(value: null, child: Text('Không chọn')),
+                  ...productProvider.categories.map((c) => DropdownMenuItem<String?>(value: c.id, child: Text(c.name))),
                 ],
                 onChanged: (v) {
                   params.onCategoryChanged(v);
                   params.requestRebuild();
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              _sheetLabel('Link ảnh'),
               TextFormField(
                 controller: params.imageUrlController,
-                decoration: const InputDecoration(labelText: 'Link ảnh', border: OutlineInputBorder()),
+                decoration: _sheetInputDecoration('https://...'),
                 keyboardType: TextInputType.url,
                 onChanged: (_) => params.requestRebuild(),
               ),
@@ -391,7 +492,7 @@ class ProductFormScreenMobile extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewPadding.bottom),
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + MediaQuery.of(context).viewPadding.bottom),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -401,23 +502,49 @@ class ProductFormScreenMobile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Định mức tồn kho', style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Xong')),
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: _blueLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.storage_outlined, size: 24, color: _bluePrimary),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Định mức tồn kho',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _bluePrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Xong'),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
+            _sheetLabel('Tồn kho tối thiểu'),
             TextFormField(
               controller: params.minStockController,
-              decoration: const InputDecoration(labelText: 'Tồn kho tối thiểu', border: OutlineInputBorder()),
+              decoration: _sheetInputDecoration('0'),
               keyboardType: TextInputType.number,
               onChanged: (_) => params.requestRebuild(),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 18),
+            _sheetLabel('Tồn kho tối đa'),
             TextFormField(
               controller: params.maxStockController,
-              decoration: const InputDecoration(labelText: 'Tồn kho tối đa', border: OutlineInputBorder()),
+              decoration: _sheetInputDecoration('0'),
               keyboardType: TextInputType.number,
               onChanged: (_) => params.requestRebuild(),
             ),
@@ -451,7 +578,7 @@ class ProductFormScreenMobile extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewPadding.bottom),
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + MediaQuery.of(context).viewPadding.bottom),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -461,16 +588,41 @@ class ProductFormScreenMobile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Giá bán', style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Xong')),
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: _blueLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.sell_outlined, size: 24, color: _bluePrimary),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Giá bán',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _bluePrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Xong'),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
+            _sheetLabel('Giá bán *'),
             TextFormField(
               controller: params.priceController,
-              decoration: const InputDecoration(labelText: 'Giá bán *', suffixText: 'đ', border: OutlineInputBorder()),
+              decoration: _sheetInputDecoration('0').copyWith(suffixText: 'đ'),
               keyboardType: TextInputType.number,
               onChanged: (_) => params.requestRebuild(),
             ),
@@ -525,7 +677,7 @@ class ProductFormScreenMobile extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewPadding.bottom),
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + MediaQuery.of(context).viewPadding.bottom),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -535,16 +687,41 @@ class ProductFormScreenMobile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Thông tin khác', style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Xong')),
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: _blueLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.info_outline_rounded, size: 24, color: _bluePrimary),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Thông tin khác',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _bluePrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Xong'),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
+            _sheetLabel('Nhà sản xuất'),
             TextFormField(
               controller: params.manufacturerController,
-              decoration: const InputDecoration(labelText: 'Nhà sản xuất', border: OutlineInputBorder()),
+              decoration: _sheetInputDecoration('Tùy chọn'),
               onChanged: (_) => params.requestRebuild(),
             ),
             const SizedBox(height: 24),

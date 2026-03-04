@@ -30,6 +30,7 @@ class AppNavigationRail extends StatelessWidget {
     (route: AppRoutes.employeeManagement, icon: Icons.badge_rounded),
     (route: AppRoutes.salesReport, icon: Icons.bar_chart_rounded),
     (route: AppRoutes.shopSettings, icon: Icons.settings_rounded),
+    (route: AppRoutes.feedback, icon: Icons.feedback_outlined),
   ];
 
   String _labelForRoute(BuildContext context, String route) {
@@ -44,6 +45,7 @@ class AppNavigationRail extends StatelessWidget {
       case AppRoutes.employeeManagement: return l10n.employees;
       case AppRoutes.salesReport: return l10n.reports;
       case AppRoutes.shopSettings: return l10n.settings;
+      case AppRoutes.feedback: return 'Góp ý';
       default: return route;
     }
   }
@@ -58,6 +60,7 @@ class AppNavigationRail extends StatelessWidget {
       }
       if (active == AppRoutes.productGroup && d.route == AppRoutes.inventory) return i;
       if (active == AppRoutes.branchManagement && d.route == AppRoutes.shopSettings) return i;
+      if (active == AppRoutes.feedback && d.route == AppRoutes.feedback) return i;
       if (active.startsWith('/report') && d.route == AppRoutes.salesReport) return i;
     }
     return 0;

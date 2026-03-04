@@ -5,6 +5,8 @@ import '../core/routes.dart';
 import '../l10n/app_localizations.dart';
 import '../core/permission_routes.dart';
 import '../controllers/auth_provider.dart';
+import '../controllers/branch_provider.dart';
+import '../utils/platform_utils.dart';
 import '../widgets/branch_selector_widget.dart';
 import 'pro_required_dialog.dart';
 
@@ -113,6 +115,8 @@ class _AppSidebarState extends State<AppSidebar> {
     if (activeRoute == AppRoutes.shopSettings ||
         activeRoute == AppRoutes.branchManagement ||
         activeRoute == AppRoutes.electronicInvoice ||
+        activeRoute == AppRoutes.kiotVietLookup ||
+        activeRoute == AppRoutes.kiotVietDataGoc ||
         activeRoute == AppRoutes.advancedSettings ||
         activeRoute == AppRoutes.appAccountSettings) {
       _isSettingsExpanded = true;
@@ -253,12 +257,23 @@ class _AppSidebarState extends State<AppSidebar> {
                           _buildReportsMenu(context, auth),
                           const SizedBox(height: 4),
                           _buildSettingsMenu(context, auth),
+                          if (isDesktopPlatform && auth.shop?.isKiotVietEnabled == true) ...[
+                            const SizedBox(height: 4),
+                            _buildTraDuLieuButton(context),
+                            const SizedBox(height: 4),
+                            _buildBangDuLieuButton(context),
+                          ],
                         ],
                       ),
                     );
                   },
                 ),
               ),
+            ),
+          // Nút Góp ý cố định phía dưới (luôn thấy, không cần cuộn)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
+              child: _buildFeedbackButton(context),
             ),
           // Language quick switch
             Padding(
@@ -373,6 +388,91 @@ class _AppSidebarState extends State<AppSidebar> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Nút Tra dữ liệu (màu cam) nằm dưới Cài đặt trong sidebar.
+  Widget _buildTraDuLieuButton(BuildContext context) {
+    final theme = Theme.of(context);
+    final activeRoute = widget.activeRoute ?? '';
+    const orange = Colors.orange;
+    final isActive = activeRoute == AppRoutes.kiotVietLookup;
+    return InkWell(
+      onTap: () => _handleMenuTap(AppRoutes.kiotVietLookup),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isActive ? orange.withValues(alpha: 0.25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_rounded,
+              size: 20,
+              color: isActive ? orange : orange,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Tra dữ liệu',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: isActive ? Colors.orange.shade800 : orange,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Nút Bảng dữ liệu (màu cam) nằm dưới Tra dữ liệu trong sidebar.
+  Widget _buildBangDuLieuButton(BuildContext context) {
+    final theme = Theme.of(context);
+    final activeRoute = widget.activeRoute ?? '';
+    const orange = Colors.orange;
+    final isActive = activeRoute == AppRoutes.kiotVietDataGoc;
+    return InkWell(
+      onTap: () => _handleMenuTap(AppRoutes.kiotVietDataGoc),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isActive ? orange.withValues(alpha: 0.25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.table_chart_rounded,
+              size: 20,
+              color: isActive ? orange : orange,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Bảng dữ liệu',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: isActive ? Colors.orange.shade800 : orange,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Nút Góp ý cho phần mềm ở phía dưới sidebar.
+  Widget _buildFeedbackButton(BuildContext context) {
+    final activeRoute = widget.activeRoute ?? '';
+    final isActive = activeRoute == AppRoutes.feedback;
+    return _buildSidebarItem(
+      context,
+      icon: Icons.feedback_outlined,
+      label: 'Góp ý cho phần mềm',
+      isActive: isActive,
+      onTap: () => _handleMenuTap(AppRoutes.feedback),
     );
   }
 
@@ -583,10 +683,13 @@ setState(() {
 
   Widget _buildInventoryMenu(BuildContext context, AuthProvider auth) {
     final l10n = AppLocalizations.of(context)!;
+    final branchProvider = context.watch<BranchProvider>();
+    final branches = branchProvider.branches.where((b) => b.isActive).toList();
+    final showTransferStock = auth.isPro && branches.length >= 2;
     final subItems = [
       (l10n.stockOverview, AppRoutes.stockOverview),
       (l10n.purchase, AppRoutes.purchase),
-      (l10n.transferStock, AppRoutes.transferStock),
+      if (showTransferStock) (l10n.transferStock, AppRoutes.transferStock),
       (l10n.adjustStock, AppRoutes.adjustStock),
     ];
     final visible = subItems.where((e) {
@@ -914,6 +1017,10 @@ setState(() {
       (l10n.shopInfo, AppRoutes.shopSettings),
       (l10n.branchManagement, AppRoutes.branchManagement),
       (l10n.eInvoice, AppRoutes.electronicInvoice),
+      if (isDesktopPlatform && auth.shop?.isKiotVietEnabled == true) ...[
+        ('Tra dữ liệu', AppRoutes.kiotVietLookup),
+        ('Bảng dữ liệu', AppRoutes.kiotVietDataGoc),
+      ],
       (l10n.advancedFeatures, AppRoutes.advancedSettings),
       (l10n.appAccount, AppRoutes.appAccountSettings),
     ];

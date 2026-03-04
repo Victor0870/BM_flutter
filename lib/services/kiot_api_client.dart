@@ -7,12 +7,14 @@ const String kKiotVietProductsUrl = 'https://public.kiotapi.com/products';
 /// Header: Retailer (tên gian hàng), Authorization: Bearer {Access Token}.
 abstract class KiotVietApiClient {
   /// Lấy danh sách hàng hóa. Nếu [lastModifiedFrom] khác null thì chỉ lấy bản ghi cập nhật sau thời điểm đó (tối ưu sync).
+  /// [branchIds]: lọc tồn kho theo chi nhánh (KiotViet API BranchIds).
   /// Trả về data[] từ response (`List<Map<String, dynamic>>`).
   Future<List<Map<String, dynamic>>> fetchProducts({
     DateTime? lastModifiedFrom,
     int pageSize = 100,
     int currentItem = 0,
     bool includeInventory = true,
+    List<int>? branchIds,
   });
 }
 
@@ -34,6 +36,7 @@ class KiotVietApiClientImpl implements KiotVietApiClient {
     int pageSize = 100,
     int currentItem = 0,
     bool includeInventory = true,
+    List<int>? branchIds,
   }) async {
     final query = <String, dynamic>{
       'pageSize': pageSize,
@@ -42,6 +45,9 @@ class KiotVietApiClientImpl implements KiotVietApiClient {
     };
     if (lastModifiedFrom != null) {
       query['lastModifiedFrom'] = lastModifiedFrom.toUtc().toIso8601String();
+    }
+    if (branchIds != null && branchIds.isNotEmpty) {
+      query['BranchIds'] = branchIds.join(',');
     }
 
     final response = await dio.get<Map<String, dynamic>>(

@@ -187,6 +187,8 @@ class ShopModel {
   final bool syncWithKiotViet; // Toggle cho phép người dùng bật/tắt đồng bộ (mặc định false)
   final String? kiotClientId; // Client ID của KiotViet
   final String? kiotClientSecret; // Client Secret của KiotViet
+  /// Tên kết nối KiotViet (Retailer) — ví dụ: danganhauto. Dùng làm header Retailer khi gọi API.
+  final String? kiotRetailer;
   
   // Cấu hình cập nhật tồn kho
   final bool allowQuickStockUpdate; // Cho phép cập nhật nhanh tồn kho tại danh sách (mặc định true)
@@ -220,6 +222,9 @@ class ShopModel {
   final Map<String, dynamic>? settings;
   final bool isActive;
 
+  /// Tổng số hóa đơn bán hàng (tăng 1 mỗi lần lưu đơn vào Firestore) — dùng cho admin xem shop có đang hoạt động
+  final int totalSalesCount;
+
   ShopModel({
     required this.id,
     required this.name,
@@ -242,6 +247,7 @@ class ShopModel {
     this.syncWithKiotViet = false,
     this.kiotClientId,
     this.kiotClientSecret,
+    this.kiotRetailer,
     this.allowQuickStockUpdate = true,
     this.deductStockOnEinvoiceOnly = false,
     this.vatRate = 0.0,
@@ -258,6 +264,7 @@ class ShopModel {
     this.updatedAt,
     this.settings,
     this.isActive = true,
+    this.totalSalesCount = 0,
   });
 
   /// Parse ngày từ Firestore (Timestamp hoặc chuỗi ISO) — tránh crash khi định dạng khác.
@@ -304,6 +311,7 @@ class ShopModel {
       syncWithKiotViet: data['syncWithKiotViet'] ?? false,
       kiotClientId: data['kiotClientId']?.toString(),
       kiotClientSecret: data['kiotClientSecret']?.toString(),
+      kiotRetailer: data['kiotRetailer']?.toString(),
       allowQuickStockUpdate: data['allowQuickStockUpdate'] ?? true,
       deductStockOnEinvoiceOnly: data['deductStockOnEinvoiceOnly'] ?? false,
       vatRate: (data['vatRate'] as num?)?.toDouble() ?? 0.0,
@@ -320,6 +328,7 @@ class ShopModel {
           ? Map<String, dynamic>.from(data['settings'])
           : null,
       isActive: data['isActive'] ?? true,
+      totalSalesCount: (data['totalSalesCount'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -359,6 +368,7 @@ class ShopModel {
       syncWithKiotViet: json['syncWithKiotViet'] ?? false,
       kiotClientId: json['kiotClientId']?.toString(),
       kiotClientSecret: json['kiotClientSecret']?.toString(),
+      kiotRetailer: json['kiotRetailer']?.toString(),
       allowQuickStockUpdate: json['allowQuickStockUpdate'] ?? true,
       deductStockOnEinvoiceOnly: json['deductStockOnEinvoiceOnly'] ?? false,
       vatRate: (json['vatRate'] as num?)?.toDouble() ?? 0.0,
@@ -375,6 +385,7 @@ class ShopModel {
           ? Map<String, dynamic>.from(json['settings'])
           : null,
       isActive: json['isActive'] ?? true,
+      totalSalesCount: (json['totalSalesCount'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -402,6 +413,7 @@ class ShopModel {
       'syncWithKiotViet': syncWithKiotViet,
       'kiotClientId': kiotClientId,
       'kiotClientSecret': kiotClientSecret,
+      'kiotRetailer': kiotRetailer,
       'allowQuickStockUpdate': allowQuickStockUpdate,
       'deductStockOnEinvoiceOnly': deductStockOnEinvoiceOnly,
       'vatRate': vatRate,
@@ -418,6 +430,7 @@ class ShopModel {
       'updatedAt': updatedAt?.toIso8601String(),
       'settings': settings,
       'isActive': isActive,
+      'totalSalesCount': totalSalesCount,
     };
   }
 
@@ -446,6 +459,7 @@ class ShopModel {
       'syncWithKiotViet': syncWithKiotViet,
       'kiotClientId': kiotClientId,
       'kiotClientSecret': kiotClientSecret,
+      'kiotRetailer': kiotRetailer,
       'allowQuickStockUpdate': allowQuickStockUpdate,
       'deductStockOnEinvoiceOnly': deductStockOnEinvoiceOnly,
       'vatRate': vatRate,
@@ -501,6 +515,7 @@ class ShopModel {
     bool? syncWithKiotViet,
     String? kiotClientId,
     String? kiotClientSecret,
+    String? kiotRetailer,
     bool? allowQuickStockUpdate,
     bool? deductStockOnEinvoiceOnly,
     double? vatRate,
@@ -517,6 +532,7 @@ class ShopModel {
     DateTime? updatedAt,
     Map<String, dynamic>? settings,
     bool? isActive,
+    int? totalSalesCount,
   }) {
     return ShopModel(
       id: id ?? this.id,
@@ -540,6 +556,7 @@ class ShopModel {
       syncWithKiotViet: syncWithKiotViet ?? this.syncWithKiotViet,
       kiotClientId: kiotClientId ?? this.kiotClientId,
       kiotClientSecret: kiotClientSecret ?? this.kiotClientSecret,
+      kiotRetailer: kiotRetailer ?? this.kiotRetailer,
       allowQuickStockUpdate: allowQuickStockUpdate ?? this.allowQuickStockUpdate,
       deductStockOnEinvoiceOnly: deductStockOnEinvoiceOnly ?? this.deductStockOnEinvoiceOnly,
       vatRate: vatRate ?? this.vatRate,
@@ -556,6 +573,7 @@ class ShopModel {
       updatedAt: updatedAt ?? this.updatedAt,
       settings: settings ?? this.settings,
       isActive: isActive ?? this.isActive,
+      totalSalesCount: totalSalesCount ?? this.totalSalesCount,
     );
   }
 }

@@ -14,13 +14,14 @@ class HomeScreenDesktop extends StatelessWidget {
   const HomeScreenDesktop({
     super.key,
     required this.snapshot,
+    required this.bellKey,
   });
 
   final HomeScreenSnapshot snapshot;
+  final GlobalKey bellKey;
 
   static const double _contentPadding = 32;
   static const double _sectionSpacing = 32;
-  static final GlobalKey _bellKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +106,7 @@ class HomeScreenDesktop extends StatelessWidget {
             builder: (context, np, _) {
               final hasUnread = np.unreadCount > 0;
               return IconButton(
-                key: _bellKey,
+                key: bellKey,
                 icon: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -127,7 +128,7 @@ class HomeScreenDesktop extends StatelessWidget {
                   ],
                 ),
                 onPressed: () {
-                  final box = _bellKey.currentContext?.findRenderObject() as RenderBox?;
+                  final box = bellKey.currentContext?.findRenderObject() as RenderBox?;
                   if (box != null) {
                     final offset = box.localToGlobal(Offset.zero);
                     NotificationPopup.show(context, offset, box.size);

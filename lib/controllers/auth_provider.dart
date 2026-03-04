@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/shop_model.dart';
 import '../models/user_model.dart';
 import '../services/local_db_service.dart';
+import '../services/kiot_viet_sync_service.dart';
 
 /// Provider quản lý trạng thái authentication và thông tin shop
 class AuthProvider with ChangeNotifier {
@@ -354,19 +355,31 @@ class AuthProvider with ChangeNotifier {
         if (shopDoc.exists && shopDoc.data() != null) {
           _shop = ShopModel.fromFirestore(shopDoc.data()!, shopDoc.id);
         } else {
-          // Không tìm thấy shop data, có thể là user mới
-          // Tạo shop mặc định với gói BASIC
+          // Tài khoản mới đăng nhập lần đầu (BASIC): tạo shop trên Firestore để lưu thông tin và hiển thị trong danh sách admin (có thể nâng cấp PRO sau).
+          final now = DateTime.now();
           _shop = ShopModel(
             id: user.uid,
-            name: user.displayName ?? 'Shop Name',
+            name: user.displayName ?? user.email?.split('@').first ?? 'Shop',
             email: user.email,
             packageType: 'BASIC',
             isActive: true,
+            createdAt: now,
+            updatedAt: now,
+            totalSalesCount: 0,
           );
           _isOfflineMode = true;
 
-          // Lưu shop mặc định vào Firestore (optional)
-          // await firestore.collection('shops').doc(user.uid).set(_shop!.toFirestore());
+          try {
+            await firestore.collection('shops').doc(user.uid).set(_shop!.toFirestore());
+            if (kDebugMode) {
+              debugPrint('✅ Shop BASIC tạo trên Firestore lần đầu: ${user.uid}');
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              debugPrint('❌ Lỗi tạo shop trên Firestore: $e');
+            }
+            // Vẫn giữ _shop trong memory để app chạy; lần sau đăng nhập hoặc khi user cập nhật thông tin shop sẽ ghi qua saveShopData
+          }
         }
       }
 
@@ -386,6 +399,12 @@ class AuthProvider with ChangeNotifier {
               debugPrint('PRO license expired. App will run in Offline mode.');
             }
           }
+        }
+        // Đồng bộ dữ liệu KiotViet xuống local (batch) khi isKiotVietEnabled, để màn Tra dữ liệu có data tra cứu
+        if (!kIsWeb && _shop!.isKiotVietEnabled == true) {
+          KiotVietSyncService().syncIfNeeded(_shop!.id);
+          // Tải global_parts_catalog từ Firestore xuống local nếu chưa có (tra cứu sau chỉ dùng local)
+          KiotVietSyncService().syncGlobalPartsCatalogIfNeeded();
         }
       }
 

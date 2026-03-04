@@ -50,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen>
   final GlobalKey keyQuickActionProducts = GlobalKey();
   final GlobalKey keyQuickActionStock = GlobalKey();
   final GlobalKey keyQuickActionPurchase = GlobalKey();
+  final GlobalKey _bellKey = GlobalKey();
   final String _activeTab = 'dashboard';
 
   final int _totalCustomers = 0;
@@ -585,6 +586,6 @@ class _HomeScreenState extends State<HomeScreen>
         onMenuTap: _handleMenuTap,
       );
     }
-    return HomeScreenDesktop(snapshot: _snapshot);
+    return HomeScreenDesktop(snapshot: _snapshot, bellKey: _bellKey);
   }
 }

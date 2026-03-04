@@ -82,6 +82,10 @@ class BranchProvider with ChangeNotifier {
       _errorMessage = null;
       _safeNotifyListeners();
 
+      // Mobile/Desktop: đồng bộ chi nhánh từ Firestore xuống SQLite trước để danh sách đủ như trên web
+      if (!kIsWeb) {
+        await _branchService!.syncBranchesFromFirestoreIfNeeded();
+      }
       _branches = await _branchService!.getBranches(includeInactive: includeInactive);
 
       // Kiểm tra nếu provider đã bị dispose trước khi cập nhật state
@@ -273,9 +277,21 @@ class BranchProvider with ChangeNotifier {
 
   /// Thiết lập chi nhánh hiện tại được chọn
   /// Lưu vào SharedPreferences để nhớ khi khởi động lại app
+  /// Nhân viên (staff) có workingBranchId thì không thể đổi sang chi nhánh khác.
   Future<void> setSelectedBranch(String branchId) async {
     if (_disposed) return;
-    
+
+    final userProfile = authProvider.userProfile;
+    if (userProfile != null && userProfile.isStaff &&
+        userProfile.workingBranchId != null && userProfile.workingBranchId!.isNotEmpty) {
+      if (branchId != userProfile.workingBranchId) {
+        if (kDebugMode) {
+          debugPrint('Staff cannot change branch; keeping workingBranchId: ${userProfile.workingBranchId}');
+        }
+        return;
+      }
+    }
+
     // Kiểm tra xem branchId có tồn tại trong danh sách không
     final branchExists = _branches.any((b) => b.id == branchId);
     if (!branchExists) {

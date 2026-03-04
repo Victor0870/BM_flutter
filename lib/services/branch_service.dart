@@ -24,15 +24,34 @@ class BranchService {
 
   /// Lấy tất cả chi nhánh
   /// CHỈ ĐỌC TỪ SQLITE để tiết kiệm chi phí Firebase
-  /// Để có dữ liệu mới nhất, gọi syncAllFromCloud() từ ProductService
+  /// Trên mobile: loadBranches() sẽ gọi syncBranchesFromFirestoreIfNeeded() trước để đảm bảo SQLite có dữ liệu mới từ Firestore.
   Future<List<BranchModel>> getBranches({bool includeInactive = false}) async {
     // Trên web, vẫn phải dùng Firestore vì không có SQLite
     if (kIsWeb) {
       return await _getBranchesFromFirestore(includeInactive: includeInactive);
     }
 
-    // TẤT CẢ các trường hợp khác: CHỈ đọc từ SQLite
+    // Mobile/Desktop: đọc từ SQLite (sau khi đã sync từ Firestore nếu cần)
     return await _localDb.getBranches(includeInactive: includeInactive);
+  }
+
+  /// Đồng bộ danh sách chi nhánh từ Firestore xuống SQLite (chỉ chạy trên mobile/desktop, không chạy trên web).
+  /// Gọi trước getBranches() để đảm bảo mobile thấy đủ chi nhánh như desktop.
+  Future<void> syncBranchesFromFirestoreIfNeeded() async {
+    if (kIsWeb) return;
+    try {
+      final fromCloud = await _getBranchesFromFirestore(includeInactive: true);
+      for (final branch in fromCloud) {
+        await _localDb.addBranch(branch);
+      }
+      if (kDebugMode && fromCloud.isNotEmpty) {
+        debugPrint('✅ BranchService: Synced ${fromCloud.length} branches from Firestore to SQLite');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('BranchService syncBranchesFromFirestoreIfNeeded error: $e');
+      }
+    }
   }
 
   /// Lấy chi nhánh theo ID

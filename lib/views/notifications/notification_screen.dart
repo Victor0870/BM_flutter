@@ -94,6 +94,16 @@ class NotificationScreen extends StatelessWidget {
         Navigator.pushNamed(context, AppRoutes.lowStockReport);
       }
     }
+
+    if (n.type == 'feedback_response' && n.relatedId != null && n.relatedId!.isNotEmpty) {
+      if (context.mounted) {
+        Navigator.pushNamed(
+          context,
+          AppRoutes.feedbackDetail,
+          arguments: n.relatedId,
+        );
+      }
+    }
   }
 }
 

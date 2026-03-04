@@ -60,7 +60,7 @@ class LocalDbService {
 
     final db = await openDatabase(
       path,
-      version: 15, // 15: thêm bảng app_prefs cho tutorial flags
+      version: 18, // 18: global_parts_catalog_data.last_updated (dấu vết sửa đổi để đồng bộ)
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -76,8 +76,274 @@ class LocalDbService {
     await _ensureBranchColumnsExist(db);
     await _ensureStockHistoryTableExists(db);
     await _ensureSalesReturnsTableExists(db);
+    await _ensureKiotVietTablesExist(db);
+    await _ensureGlobalPartsCatalogTablesExist(db);
 
     return db;
+  }
+
+  Future<void> _ensureGlobalPartsCatalogTablesExist(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS global_parts_catalog_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS global_parts_catalog_data (
+        row_id TEXT PRIMARY KEY,
+        ten_xe TEXT,
+        doi_xe TEXT,
+        chung_loai TEXT,
+        ten_phu_tung TEXT,
+        cells TEXT,
+        last_updated TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_global_parts_ten_xe ON global_parts_catalog_data(ten_xe)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_global_parts_doi_xe ON global_parts_catalog_data(doi_xe)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_global_parts_chung_loai ON global_parts_catalog_data(chung_loai)');
+  }
+
+  Future<void> _ensureKiotVietTablesExist(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS kiot_viet_meta (
+        shop_id TEXT PRIMARY KEY,
+        last_update TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS kiot_viet_data (
+        shop_id TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        ten_xe TEXT,
+        doi_xe TEXT,
+        chung_loai TEXT,
+        ten_phu_tung TEXT,
+        cells TEXT,
+        PRIMARY KEY (shop_id, row_index)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS kiot_viet_product_lookup (
+        shop_id TEXT NOT NULL,
+        product_code TEXT NOT NULL,
+        product_name TEXT,
+        PRIMARY KEY (shop_id, product_code)
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_kiot_viet_ten_xe ON kiot_viet_data(shop_id, ten_xe)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_kiot_viet_doi_xe ON kiot_viet_data(shop_id, doi_xe)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_kiot_viet_chung_loai ON kiot_viet_data(shop_id, chung_loai)');
+  }
+
+  // ========== KIOT VIET DATA (tra cứu local, đồng bộ batch từ Firestore) ==========
+
+  /// Lấy lastUpdate (ISO8601) của dữ liệu KiotViet local cho shop. Null nếu chưa có.
+  Future<String?> getKiotVietLastUpdate(String shopId) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'kiot_viet_meta',
+        where: 'shop_id = ?',
+        whereArgs: [shopId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      return rows.first['last_update'] as String?;
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getKiotVietLastUpdate: $e');
+      return null;
+    }
+  }
+
+  /// Lưu lastUpdate sau khi đồng bộ xong.
+  Future<void> setKiotVietLastUpdate(String shopId, String lastUpdateIso8601) async {
+    final db = await database;
+    await db.insert(
+      'kiot_viet_meta',
+      {'shop_id': shopId, 'last_update': lastUpdateIso8601},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Kiểm tra đã có dữ liệu local chưa.
+  Future<bool> hasKiotVietData(String shopId) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'kiot_viet_data',
+        columns: ['row_index'],
+        where: 'shop_id = ?',
+        whereArgs: [shopId],
+        limit: 1,
+      );
+      return rows.isNotEmpty;
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService hasKiotVietData: $e');
+      return false;
+    }
+  }
+
+  /// Xóa toàn bộ dữ liệu KiotViet của shop (trước khi ghi đè).
+  Future<void> clearKiotVietData(String shopId) async {
+    final db = await database;
+    await db.delete('kiot_viet_data', where: 'shop_id = ?', whereArgs: [shopId]);
+    await db.delete('kiot_viet_meta', where: 'shop_id = ?', whereArgs: [shopId]);
+  }
+
+  /// Xóa bảng tra tên sản phẩm (product code -> name) từ bundle asset.
+  Future<void> clearKiotVietProductLookup(String shopId) async {
+    final db = await database;
+    await db.delete('kiot_viet_product_lookup', where: 'shop_id = ?', whereArgs: [shopId]);
+  }
+
+  /// Xóa dữ liệu bundle (kiot_viet_data) của shop, giữ nguyên meta.
+  Future<void> clearKiotVietBundleData(String shopId) async {
+    final db = await database;
+    await db.delete('kiot_viet_data', where: 'shop_id = ?', whereArgs: [shopId]);
+  }
+
+  /// Chèn một lô dòng bundle (từ asset kiotviet2.xlsx). Format giống insertKiotVietRows.
+  Future<void> insertKiotVietBundleRows(String shopId, List<Map<String, dynamic>> rows) async {
+    if (rows.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final row in rows) {
+      batch.insert('kiot_viet_data', {
+        'shop_id': shopId,
+        'row_index': row['row_index'] as int,
+        'ten_xe': row['ten_xe'] as String? ?? '',
+        'doi_xe': row['doi_xe'] as String? ?? '',
+        'chung_loai': row['chung_loai'] as String? ?? '',
+        'ten_phu_tung': row['ten_phu_tung'] as String? ?? '',
+        'cells': row['cells'] as String? ?? '{}',
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Lưu bảng tra tên sản phẩm (product code -> name) từ bundle asset.
+  Future<void> setProductNameLookup(String shopId, Map<String, String> productCodeToName) async {
+    if (productCodeToName.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final e in productCodeToName.entries) {
+      batch.insert(
+        'kiot_viet_product_lookup',
+        {'shop_id': shopId, 'product_code': e.key, 'product_name': e.value},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Kiểm tra đã có dữ liệu bundle (kiot_viet_data) cho shop chưa.
+  Future<bool> hasKiotVietBundleData(String shopId) async {
+    return hasKiotVietData(shopId);
+  }
+
+  /// Lấy bảng tra tên sản phẩm (product code -> name) cho shop.
+  Future<Map<String, String>> getProductNameLookupMap(String shopId) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'kiot_viet_product_lookup',
+        where: 'shop_id = ?',
+        whereArgs: [shopId],
+      );
+      return {for (final r in rows) (r['product_code'] as String? ?? ''): (r['product_name'] as String? ?? '')};
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getProductNameLookupMap: $e');
+      return {};
+    }
+  }
+
+  /// Chèn một lô dòng. Mỗi row: map với keys ten_xe, doi_xe, chung_loai, ten_phu_tung, row_index, cells (JSON string).
+  Future<void> insertKiotVietRows(String shopId, List<Map<String, dynamic>> rows) async {
+    if (rows.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final row in rows) {
+      batch.insert('kiot_viet_data', {
+        'shop_id': shopId,
+        'row_index': row['row_index'] as int,
+        'ten_xe': row['ten_xe'] as String? ?? '',
+        'doi_xe': row['doi_xe'] as String? ?? '',
+        'chung_loai': row['chung_loai'] as String? ?? '',
+        'ten_phu_tung': row['ten_phu_tung'] as String? ?? '',
+        'cells': row['cells'] as String? ?? '{}',
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Tìm kiếm cục bộ theo 3 bộ lọc (LIKE %value%). Trả về danh sách map (row_index, ten_xe, doi_xe, chung_loai, ten_phu_tung, cells).
+  Future<List<Map<String, dynamic>>> getKiotVietRowsFiltered(
+    String shopId, {
+    String? tenXe,
+    String? namSanXuat,
+    String? chungLoaiPhuTung,
+  }) async {
+    try {
+      final db = await database;
+      String? where = 'shop_id = ?';
+      final args = <dynamic>[shopId];
+      if (tenXe != null && tenXe.trim().isNotEmpty) {
+        where += ' AND ten_xe LIKE ?';
+        args.add('%${tenXe.trim()}%');
+      }
+      if (namSanXuat != null && namSanXuat.trim().isNotEmpty) {
+        where += ' AND doi_xe LIKE ?';
+        args.add('%${namSanXuat.trim()}%');
+      }
+      if (chungLoaiPhuTung != null && chungLoaiPhuTung.trim().isNotEmpty) {
+        where += ' AND chung_loai LIKE ?';
+        args.add('%${chungLoaiPhuTung.trim()}%');
+      }
+      final rows = await db.query(
+        'kiot_viet_data',
+        where: where,
+        whereArgs: args,
+        orderBy: 'row_index ASC',
+      );
+      return rows.map((m) => {
+        'row_index': m['row_index'],
+        'ten_xe': m['ten_xe'],
+        'doi_xe': m['doi_xe'],
+        'chung_loai': m['chung_loai'],
+        'ten_phu_tung': m['ten_phu_tung'],
+        'cells': m['cells'],
+      }).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getKiotVietRowsFiltered: $e');
+      return [];
+    }
+  }
+
+  /// Lấy toàn bộ dòng KiotViet từ local (để hiển thị bảng). cells trả về dạng Map (parse từ JSON).
+  /// Format giống Firestore: [{ index, cells: Map }, ...].
+  Future<List<Map<String, dynamic>>> getAllKiotVietRows(String shopId) async {
+    try {
+      final list = await getKiotVietRowsFiltered(shopId);
+      return list.map((m) {
+        final cellsStr = m['cells'] as String?;
+        Map<String, dynamic> cells = {};
+        if (cellsStr != null && cellsStr.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(cellsStr);
+            if (decoded is Map) cells = Map<String, dynamic>.from(decoded);
+          } catch (_) {}
+        }
+        return <String, dynamic>{
+          'index': m['row_index'] as int? ?? 0,
+          'cells': cells,
+        };
+      }).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getAllKiotVietRows: $e');
+      return [];
+    }
   }
 
   /// Kiểm tra và thêm các columns còn thiếu vào bảng sales
@@ -1048,6 +1314,327 @@ class LocalDbService {
     }
     if (oldVersion < 15) {
       await _ensureAppPrefsTableExists(db);
+    }
+    if (oldVersion < 16) {
+      await _ensureKiotVietTablesExist(db);
+    }
+    if (oldVersion < 17) {
+      await _ensureGlobalPartsCatalogTablesExist(db);
+    }
+    if (oldVersion < 18) {
+      try {
+        await db.execute('ALTER TABLE global_parts_catalog_data ADD COLUMN last_updated TEXT');
+      } catch (e) {
+        // Cột có thể đã tồn tại
+      }
+    }
+  }
+
+  // ========== GLOBAL PARTS CATALOG (tra cứu phụ tùng toàn hệ thống, tải 1 lần từ Firestore) ==========
+
+  /// Kiểm tra đã có dữ liệu global_parts_catalog local chưa.
+  Future<bool> hasGlobalPartsCatalogData() async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'global_parts_catalog_data',
+        columns: ['row_id'],
+        limit: 1,
+      );
+      return rows.isNotEmpty;
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService hasGlobalPartsCatalogData: $e');
+      return false;
+    }
+  }
+
+  /// Xóa toàn bộ dữ liệu global_parts_catalog (trước khi ghi đè).
+  Future<void> clearGlobalPartsCatalog() async {
+    final db = await database;
+    await db.delete('global_parts_catalog_data');
+    await db.delete('global_parts_catalog_meta');
+  }
+
+  /// Chèn một lô dòng. Mỗi row: map với row_id, ten_xe, doi_xe, chung_loai, ten_phu_tung, cells (JSON string).
+  Future<void> insertGlobalPartsCatalogRows(List<Map<String, dynamic>> rows) async {
+    if (rows.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final row in rows) {
+      batch.insert('global_parts_catalog_data', {
+        'row_id': row['row_id'] as String,
+        'ten_xe': row['ten_xe'] as String? ?? '',
+        'doi_xe': row['doi_xe'] as String? ?? '',
+        'chung_loai': row['chung_loai'] as String? ?? '',
+        'ten_phu_tung': row['ten_phu_tung'] as String? ?? '',
+        'cells': row['cells'] as String? ?? '{}',
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Đánh dấu đã đồng bộ xong.
+  Future<void> setGlobalPartsCatalogSynced() async {
+    final db = await database;
+    await db.insert(
+      'global_parts_catalog_meta',
+      {'key': 'synced', 'value': DateTime.now().toUtc().toIso8601String()},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Tìm kiếm global_parts_catalog theo 3 bộ lọc (LIKE %value%). Trả về danh sách map (row_id, ten_xe, doi_xe, chung_loai, ten_phu_tung, cells).
+  Future<List<Map<String, dynamic>>> getGlobalPartsCatalogRowsFiltered({
+    String? tenXe,
+    String? namSanXuat,
+    String? chungLoaiPhuTung,
+  }) async {
+    try {
+      final db = await database;
+      String? where = '1=1';
+      final args = <dynamic>[];
+      if (tenXe != null && tenXe.trim().isNotEmpty) {
+        where += ' AND ten_xe LIKE ?';
+        args.add('%${tenXe.trim()}%');
+      }
+      if (namSanXuat != null && namSanXuat.trim().isNotEmpty) {
+        where += ' AND doi_xe LIKE ?';
+        args.add('%${namSanXuat.trim()}%');
+      }
+      if (chungLoaiPhuTung != null && chungLoaiPhuTung.trim().isNotEmpty) {
+        where += ' AND chung_loai LIKE ?';
+        args.add('%${chungLoaiPhuTung.trim()}%');
+      }
+      final rows = await db.query(
+        'global_parts_catalog_data',
+        where: where,
+        whereArgs: args.isEmpty ? null : args,
+        orderBy: 'row_id ASC',
+      );
+      return rows.map((m) => {
+        'row_id': m['row_id'],
+        'ten_xe': m['ten_xe'],
+        'doi_xe': m['doi_xe'],
+        'chung_loai': m['chung_loai'],
+        'ten_phu_tung': m['ten_phu_tung'],
+        'cells': m['cells'],
+      }).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getGlobalPartsCatalogRowsFiltered: $e');
+      return [];
+    }
+  }
+
+  static String _cellValue(Map<String, dynamic> cells, String key) {
+    final v = cells[key] ?? cells[key.replaceAll(' ', '_')];
+    return (v?.toString() ?? '').trim();
+  }
+
+  /// Cập nhật một dòng trong global_parts_catalog_data (local). Ghi thêm last_updated để biết dòng đã sửa (đồng bộ sau).
+  Future<void> updateGlobalPartsCatalogRow(String rowId, Map<String, dynamic> cells) async {
+    if (rowId.isEmpty) return;
+    final db = await database;
+    final tenXe = _cellValue(cells, 'Tên Xe');
+    final doiXe = _cellValue(cells, 'Đời Xe');
+    final chungLoai = _cellValue(cells, 'Chủng loại');
+    final tenPhuTung = _cellValue(cells, 'Tên Phụ Tùng');
+    final cellsJson = jsonEncode(cells);
+    final lastUpdated = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'global_parts_catalog_data',
+      {
+        'ten_xe': tenXe,
+        'doi_xe': doiXe,
+        'chung_loai': chungLoai,
+        'ten_phu_tung': tenPhuTung,
+        'cells': cellsJson,
+        'last_updated': lastUpdated,
+      },
+      where: 'row_id = ?',
+      whereArgs: [rowId],
+    );
+  }
+
+  /// Gợi ý Tên xe từ global_parts_catalog. [namSanXuat]/[chungLoaiPhuTung] nếu có thì chỉ gợi ý giá trị tồn tại cùng bộ lọc đó.
+  Future<List<String>> getGlobalPartsCatalogTenXeSuggestions(
+    String query, {
+    String? namSanXuat,
+    String? chungLoaiPhuTung,
+  }) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final db = await database;
+      var where = "ten_xe IS NOT NULL AND ten_xe != '' AND ten_xe LIKE ?";
+      final args = <dynamic>['%${query.trim()}%'];
+      if (namSanXuat != null && namSanXuat.trim().isNotEmpty) {
+        where += ' AND doi_xe LIKE ?';
+        args.add('%${namSanXuat.trim()}%');
+      }
+      if (chungLoaiPhuTung != null && chungLoaiPhuTung.trim().isNotEmpty) {
+        where += ' AND chung_loai LIKE ?';
+        args.add('%${chungLoaiPhuTung.trim()}%');
+      }
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT ten_xe FROM global_parts_catalog_data WHERE $where ORDER BY ten_xe LIMIT 20',
+        args,
+      );
+      return rows.map((r) => (r['ten_xe'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getGlobalPartsCatalogTenXeSuggestions: $e');
+      return [];
+    }
+  }
+
+  /// Gợi ý Chủng loại từ global_parts_catalog. [tenXe]/[namSanXuat] nếu có thì chỉ gợi ý giá trị tồn tại cùng bộ lọc đó.
+  Future<List<String>> getGlobalPartsCatalogChungLoaiSuggestions(
+    String query, {
+    String? tenXe,
+    String? namSanXuat,
+  }) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final db = await database;
+      var where = "chung_loai IS NOT NULL AND chung_loai != '' AND chung_loai LIKE ?";
+      final args = <dynamic>['%${query.trim()}%'];
+      if (tenXe != null && tenXe.trim().isNotEmpty) {
+        where += ' AND ten_xe LIKE ?';
+        args.add('%${tenXe.trim()}%');
+      }
+      if (namSanXuat != null && namSanXuat.trim().isNotEmpty) {
+        where += ' AND doi_xe LIKE ?';
+        args.add('%${namSanXuat.trim()}%');
+      }
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT chung_loai FROM global_parts_catalog_data WHERE $where ORDER BY chung_loai LIMIT 20',
+        args,
+      );
+      return rows.map((r) => (r['chung_loai'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getGlobalPartsCatalogChungLoaiSuggestions: $e');
+      return [];
+    }
+  }
+
+  /// Gợi ý Đời xe từ global_parts_catalog. [tenXe]/[chungLoaiPhuTung] nếu có thì chỉ gợi ý giá trị tồn tại cùng bộ lọc đó.
+  Future<List<String>> getGlobalPartsCatalogDoiXeSuggestions(
+    String query, {
+    String? tenXe,
+    String? chungLoaiPhuTung,
+  }) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final db = await database;
+      var where = "doi_xe IS NOT NULL AND doi_xe != '' AND doi_xe LIKE ?";
+      final args = <dynamic>['%${query.trim()}%'];
+      if (tenXe != null && tenXe.trim().isNotEmpty) {
+        where += ' AND ten_xe LIKE ?';
+        args.add('%${tenXe.trim()}%');
+      }
+      if (chungLoaiPhuTung != null && chungLoaiPhuTung.trim().isNotEmpty) {
+        where += ' AND chung_loai LIKE ?';
+        args.add('%${chungLoaiPhuTung.trim()}%');
+      }
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT doi_xe FROM global_parts_catalog_data WHERE $where ORDER BY doi_xe LIMIT 20',
+        args,
+      );
+      return rows.map((r) => (r['doi_xe'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getGlobalPartsCatalogDoiXeSuggestions: $e');
+      return [];
+    }
+  }
+
+  /// Gợi ý Tên xe từ kiot_viet_data theo shop. [namSanXuat]/[chungLoaiPhuTung] nếu có thì chỉ gợi ý giá trị tồn tại cùng bộ lọc đó.
+  Future<List<String>> getKiotVietTenXeSuggestions(
+    String shopId,
+    String query, {
+    String? namSanXuat,
+    String? chungLoaiPhuTung,
+  }) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final db = await database;
+      var where = 'shop_id = ? AND ten_xe IS NOT NULL AND ten_xe != '' AND ten_xe LIKE ?';
+      final args = <dynamic>[shopId, '%${query.trim()}%'];
+      if (namSanXuat != null && namSanXuat.trim().isNotEmpty) {
+        where += ' AND doi_xe LIKE ?';
+        args.add('%${namSanXuat.trim()}%');
+      }
+      if (chungLoaiPhuTung != null && chungLoaiPhuTung.trim().isNotEmpty) {
+        where += ' AND chung_loai LIKE ?';
+        args.add('%${chungLoaiPhuTung.trim()}%');
+      }
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT ten_xe FROM kiot_viet_data WHERE $where ORDER BY ten_xe LIMIT 20',
+        args,
+      );
+      return rows.map((r) => (r['ten_xe'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getKiotVietTenXeSuggestions: $e');
+      return [];
+    }
+  }
+
+  /// Gợi ý Chủng loại từ kiot_viet_data theo shop. [tenXe]/[namSanXuat] nếu có thì chỉ gợi ý giá trị tồn tại cùng bộ lọc đó.
+  Future<List<String>> getKiotVietChungLoaiSuggestions(
+    String shopId,
+    String query, {
+    String? tenXe,
+    String? namSanXuat,
+  }) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final db = await database;
+      var where = 'shop_id = ? AND chung_loai IS NOT NULL AND chung_loai != '' AND chung_loai LIKE ?';
+      final args = <dynamic>[shopId, '%${query.trim()}%'];
+      if (tenXe != null && tenXe.trim().isNotEmpty) {
+        where += ' AND ten_xe LIKE ?';
+        args.add('%${tenXe.trim()}%');
+      }
+      if (namSanXuat != null && namSanXuat.trim().isNotEmpty) {
+        where += ' AND doi_xe LIKE ?';
+        args.add('%${namSanXuat.trim()}%');
+      }
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT chung_loai FROM kiot_viet_data WHERE $where ORDER BY chung_loai LIMIT 20',
+        args,
+      );
+      return rows.map((r) => (r['chung_loai'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getKiotVietChungLoaiSuggestions: $e');
+      return [];
+    }
+  }
+
+  /// Gợi ý Đời xe từ kiot_viet_data theo shop. [tenXe]/[chungLoaiPhuTung] nếu có thì chỉ gợi ý giá trị tồn tại cùng bộ lọc đó.
+  Future<List<String>> getKiotVietDoiXeSuggestions(
+    String shopId,
+    String query, {
+    String? tenXe,
+    String? chungLoaiPhuTung,
+  }) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final db = await database;
+      var where = 'shop_id = ? AND doi_xe IS NOT NULL AND doi_xe != '' AND doi_xe LIKE ?';
+      final args = <dynamic>[shopId, '%${query.trim()}%'];
+      if (tenXe != null && tenXe.trim().isNotEmpty) {
+        where += ' AND ten_xe LIKE ?';
+        args.add('%${tenXe.trim()}%');
+      }
+      if (chungLoaiPhuTung != null && chungLoaiPhuTung.trim().isNotEmpty) {
+        where += ' AND chung_loai LIKE ?';
+        args.add('%${chungLoaiPhuTung.trim()}%');
+      }
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT doi_xe FROM kiot_viet_data WHERE $where ORDER BY doi_xe LIMIT 20',
+        args,
+      );
+      return rows.map((r) => (r['doi_xe'] as String?) ?? '').where((s) => s.isNotEmpty).toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('LocalDbService getKiotVietDoiXeSuggestions: $e');
+      return [];
     }
   }
 

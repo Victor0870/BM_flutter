@@ -43,12 +43,13 @@ class AccountPackageScreen extends StatelessWidget {
               ? _formatDate(shop.licenseEndDate!)
               : '—';
 
+          final accountEmail = authProvider.user?.email ?? '';
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildShopInfo(context, shop, branchCount),
+                _buildShopInfo(context, shop, branchCount, accountEmail),
                 const SizedBox(height: 20),
                 _buildActivePackageCard(
                   context,
@@ -69,6 +70,7 @@ class AccountPackageScreen extends StatelessWidget {
     BuildContext context,
     ShopModel shop,
     int branchCount,
+    String accountEmail,
   ) {
     final theme = Theme.of(context);
     final categoryLabel = 'Thời trang'; // Có thể lấy từ shop nếu có field
@@ -115,6 +117,29 @@ class AccountPackageScreen extends StatelessWidget {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                if (accountEmail.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.email_outlined,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          accountEmail,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontSize: 13,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

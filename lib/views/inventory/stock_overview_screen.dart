@@ -41,15 +41,25 @@ class StockOverviewScreen extends StatelessWidget {
               ],
             )
           : null,
-      body: _StockOverviewContent(useMobileLayout: useMobileLayout),
+      body: Consumer<AuthProvider>(
+        builder: (_, auth, _) => _StockOverviewContent(
+          useMobileLayout: useMobileLayout,
+          enableBranchSelection: auth.isPro,
+        ),
+      ),
     );
   }
 }
 
 class _StockOverviewContent extends StatefulWidget {
   final bool useMobileLayout;
+  /// false = gói Basic: chỉ Cửa hàng chính, không chọn chi nhánh.
+  final bool enableBranchSelection;
 
-  const _StockOverviewContent({required this.useMobileLayout});
+  const _StockOverviewContent({
+    required this.useMobileLayout,
+    this.enableBranchSelection = true,
+  });
 
   @override
   State<_StockOverviewContent> createState() => _StockOverviewContentState();
@@ -69,14 +79,19 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
     // Mặc định chọn chi nhánh hiện tại để tồn kho hiển thị đúng ngay từ đầu (tránh hiện tổng rồi tụt về)
     if (!_hasInitializedBranch) {
       _hasInitializedBranch = true;
-      final branchProvider = context.read<BranchProvider>();
-      final current = branchProvider.currentBranchId;
-      if (current != null && current.isNotEmpty) {
-        _selectedBranchId = current;
-      } else if (branchProvider.branches.isNotEmpty) {
-        _selectedBranchId = branchProvider.branches.first.id;
+      if (!widget.enableBranchSelection) {
+        _selectedBranchId = kMainStoreBranchId;
+      } else {
+        final branchProvider = context.read<BranchProvider>();
+        final current = branchProvider.currentBranchId;
+        if (current != null && current.isNotEmpty) {
+          _selectedBranchId = current;
+        } else if (branchProvider.branches.isNotEmpty) {
+          _selectedBranchId = branchProvider.branches.first.id;
+        } else {
+          _selectedBranchId = kMainStoreBranchId;
+        }
       }
-      // Nếu vẫn null, giữ nguyên (sẽ hiển thị "Tất cả" = product.stock)
     }
   }
 
@@ -85,6 +100,28 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
     _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  Widget _buildBranchLabel(String label) {
+    return SizedBox(
+      width: double.infinity,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 15,
+            color: Color(0xFF0F172A),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
   }
 
   void _onSearchChanged(String value) {
@@ -126,6 +163,7 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
             onStockCountPressed: () {
               _showStockCountDialog(context, _selectedBranchId);
             },
+            enableBranchSelection: widget.enableBranchSelection,
             searchController: isMobileLayout ? null : _searchController,
             onSearchChanged: isMobileLayout ? null : _onSearchChanged,
             selectedCategoryId: isMobileLayout ? null : _selectedCategoryId,
@@ -183,6 +221,7 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
               selectedBranchId: _selectedBranchId,
               onBranchChanged: (branchId) => setState(() => _selectedBranchId = branchId),
               onStockCountPressed: () => _showStockCountDialog(context, _selectedBranchId),
+              enableBranchSelection: widget.enableBranchSelection,
               showBranchDropdown: false,
             ),
           ),
@@ -197,11 +236,13 @@ class _StockOverviewContentState extends State<_StockOverviewContent> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _BranchDropdownBar(
-                          selectedBranchId: _selectedBranchId,
-                          onBranchChanged: (branchId) =>
-                              setState(() => _selectedBranchId = branchId),
-                        ),
+                        widget.enableBranchSelection
+                            ? _BranchDropdownBar(
+                                selectedBranchId: _selectedBranchId,
+                                onBranchChanged: (branchId) =>
+                                    setState(() => _selectedBranchId = branchId),
+                              )
+                            : _buildBranchLabel('Cửa hàng chính'),
                         const SizedBox(height: 12),
                         _SummaryCards(
                           selectedBranchId: _selectedBranchId,
@@ -247,6 +288,8 @@ class _HeaderSection extends StatelessWidget {
   final String? selectedBranchId;
   final ValueChanged<String?> onBranchChanged;
   final VoidCallback onStockCountPressed;
+  /// false = gói Basic: chỉ hiển thị "Cửa hàng chính", không cho chọn chi nhánh.
+  final bool enableBranchSelection;
   final TextEditingController? searchController;
   final ValueChanged<String>? onSearchChanged;
   final String? selectedCategoryId;
@@ -259,6 +302,7 @@ class _HeaderSection extends StatelessWidget {
     required this.selectedBranchId,
     required this.onBranchChanged,
     required this.onStockCountPressed,
+    this.enableBranchSelection = true,
     this.searchController,
     this.onSearchChanged,
     this.selectedCategoryId,
@@ -270,48 +314,66 @@ class _HeaderSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final actions = Row(
       children: [
-        Consumer<BranchProvider>(
-          builder: (context, branchProvider, child) {
-            final branches = branchProvider.branches.where((b) => b.isActive).toList();
-            final items = <DropdownMenuItem<String?>>[
-              const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('Tất cả chi nhánh'),
+        if (enableBranchSelection)
+          Consumer<BranchProvider>(
+            builder: (context, branchProvider, child) {
+              final branches = branchProvider.branches.where((b) => b.isActive).toList();
+              final items = <DropdownMenuItem<String?>>[
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Tất cả chi nhánh'),
+                ),
+                ...branches.map(
+                  (b) => DropdownMenuItem<String?>(
+                    value: b.id,
+                    child: Text(b.name),
+                  ),
+                ),
+              ];
+              final validValue = selectedBranchId == null ||
+                  branches.any((b) => b.id == selectedBranchId)
+                  ? selectedBranchId
+                  : null;
+              return SizedBox(
+                width: isMobile ? double.infinity : 200,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: DropdownButton<String?>(
+                    value: validValue,
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    items: items,
+                    onChanged: onBranchChanged,
+                  ),
+                ),
+              );
+            },
+          )
+        else
+          SizedBox(
+            width: isMobile ? double.infinity : 200,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
-              ...branches.map(
-                (b) => DropdownMenuItem<String?>(
-                  value: b.id,
-                  child: Text(b.name),
+              child: const Text(
+                'Cửa hàng chính',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: Color(0xFF0F172A),
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ];
-            
-            // Đảm bảo selectedBranchId hợp lệ (null hoặc có trong danh sách branches)
-            final validValue = selectedBranchId == null || 
-                               branches.any((b) => b.id == selectedBranchId)
-                ? selectedBranchId
-                : null;
-            
-            return SizedBox(
-              width: isMobile ? double.infinity : 200,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: DropdownButton<String?>(
-                  value: validValue,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: items,
-                  onChanged: onBranchChanged,
-                ),
-              ),
-            );
-          },
-        ),
+            ),
+          ),
         if (!isMobile) const SizedBox(width: 12),
         if (!isMobile)
           OutlinedButton.icon(

@@ -16,12 +16,13 @@ import '../views/inventory/product_form_screen.dart';
 import '../views/inventory/product_list_screen.dart';
 import '../views/inventory/purchase_history_screen.dart';
 import '../views/inventory/purchase_screen.dart';
+import '../views/inventory/transfer_screen.dart';
 import '../views/inventory/stock_overview_screen.dart';
 import '../views/inventory/inventory_report_screen.dart';
 import '../views/sales/sale_detail_screen.dart';
 import '../views/sales/sales_history_screen.dart';
 import '../views/sales/sales_screen.dart';
-import '../views/sales/sales_return_form_screen.dart';
+import '../views/sales/sales_return_list_screen.dart';
 import '../views/sales/einvoice_management_screen.dart';
 import '../views/reports/sales_return_report_screen.dart';
 import '../views/reports/revenue_report_screen.dart';
@@ -30,6 +31,14 @@ import '../views/reports/low_stock_report_screen.dart';
 import '../views/reports/expiry_report_screen.dart';
 import '../views/settings/shop_settings_screen.dart';
 import '../views/settings/account_package_screen.dart';
+import '../views/settings/einvoice_settings_screen.dart';
+import '../views/settings/store_setup_screen.dart';
+import '../views/settings/printer_settings_screen.dart';
+import '../views/settings/language_settings_screen.dart';
+import '../views/kiotviet/kiot_viet_lookup_screen.dart';
+import '../views/kiotviet/kiot_viet_data_goc_screen.dart';
+import '../views/feedback/feedback_list_screen.dart';
+import '../views/feedback/feedback_detail_screen.dart';
 import '../views/employees/employee_management_screen.dart';
 import '../views/employees/employee_group_management_screen.dart';
 import '../widgets/app_sidebar.dart';
@@ -45,6 +54,9 @@ class AppRoutes {
   static const String sales = '/sales';
   static const String salesHistory = '/sales-history';
   static const String shopSettings = '/shop-settings';
+  static const String storeSetup = '/store-setup';
+  static const String printerSettings = '/printer-settings';
+  static const String languageSettings = '/language-settings';
   static const String accountPackage = '/account-package';
   static const String purchase = '/purchase';
   static const String stockOverview = '/stock-overview';
@@ -59,6 +71,7 @@ class AppRoutes {
   static const String returnInvoice = '/return-invoice';
   static const String cancelInvoice = '/cancel-invoice';
   static const String electronicInvoice = '/electronic-invoice';
+  static const String einvoiceSettings = '/einvoice-settings';
   static const String productGroup = '/product-group';
   static const String serviceList = '/service-list';
   static const String serviceGroup = '/service-group';
@@ -78,6 +91,10 @@ class AppRoutes {
     static const String salesReturnReport = '/report-sales-return';
   static const String lowStockReport = '/report-low-stock';
   static const String expiryReport = '/report-expiry';
+  static const String kiotVietLookup = '/kiotviet-lookup';
+  static const String kiotVietDataGoc = '/kiotviet-data-goc';
+  static const String feedback = '/feedback';
+  static const String feedbackDetail = '/feedback-detail';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     final bool isDesktop =
@@ -98,6 +115,12 @@ class AppRoutes {
           return const SalesHistoryScreen();
         case shopSettings:
           return const ShopSettingsScreen();
+        case storeSetup:
+          return const StoreSetupScreen();
+        case printerSettings:
+          return const PrinterSettingsScreen();
+        case languageSettings:
+          return const LanguageSettingsScreen();
         case accountPackage:
           return const AccountPackageScreen();
         case purchase:
@@ -125,11 +148,13 @@ class AppRoutes {
         case reports:
           return const FeatureComingSoonScreen(title: 'Báo cáo tổng quan');
         case returnInvoice:
-          return const SalesReturnFormScreen();
+          return const SalesReturnListScreen();
         case cancelInvoice:
           return const FeatureComingSoonScreen(title: 'Hóa đơn hủy');
         case electronicInvoice:
           return const EinvoiceManagementScreen();
+        case einvoiceSettings:
+          return const EinvoiceSettingsScreen();
         case productGroup:
           return const FeatureComingSoonScreen(title: 'Nhóm sản phẩm');
         case serviceList:
@@ -137,7 +162,7 @@ class AppRoutes {
         case serviceGroup:
           return const FeatureComingSoonScreen(title: 'Nhóm dịch vụ');
         case transferStock:
-          return const FeatureComingSoonScreen(title: 'Chuyển kho');
+          return const TransferScreen();
         case adjustStock:
           return const FeatureComingSoonScreen(title: 'Điều chỉnh kho');
         case advancedSettings:
@@ -168,6 +193,15 @@ class AppRoutes {
           return const LowStockReportScreen();
         case expiryReport:
           return const ExpiryReportScreen();
+        case kiotVietLookup:
+          return const KiotVietLookupScreen();
+        case kiotVietDataGoc:
+          return const KiotVietDataGocScreen();
+        case feedback:
+          return const FeedbackListScreen();
+        case feedbackDetail:
+          final id = settings.arguments as String?;
+          return FeedbackDetailScreen(feedbackId: id ?? '');
         default:
           return const Scaffold(
             body: Center(

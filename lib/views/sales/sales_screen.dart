@@ -56,11 +56,14 @@ class _SalesScreenState extends State<SalesScreen> {
   
   // Debounce timer cho tìm kiếm khách hàng
   Timer? _customerSearchDebounce;
-  // Gợi ý khách hàng theo số điện thoại (tìm kiếm ngay khi nhập)
+  // Gợi ý khách hàng theo số điện thoại hoặc tên (tìm kiếm ngay khi nhập)
   final ValueNotifier<List<CustomerModel>?> _customerPhoneSuggestionsNotifier = ValueNotifier<List<CustomerModel>?>(null);
   final FocusNode _customerPhoneFocusNode = FocusNode();
+  final FocusNode _customerNameFocusNode = FocusNode();
   final GlobalKey _customerPhoneFieldKeyMobile = GlobalKey();
   final GlobalKey _customerPhoneFieldKeyDesktop = GlobalKey();
+  final GlobalKey _customerNameFieldKeyMobile = GlobalKey();
+  final GlobalKey _customerNameFieldKeyDesktop = GlobalKey();
   OverlayEntry? _customerSuggestionsOverlayEntry;
   /// Trì hoãn xóa overlay khi mất focus để tap vào gợi ý kịp xử lý trước (tránh xóa overlay trước khi onTap chạy).
   Timer? _customerSuggestionsDismissTimer;
@@ -85,17 +88,21 @@ class _SalesScreenState extends State<SalesScreen> {
     ));
     _activeTabId = 0;
     
+    void dismissSuggestionsOnFocusLost() {
+      _customerSuggestionsDismissTimer?.cancel();
+      _customerSuggestionsDismissTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) {
+          _customerPhoneSuggestionsNotifier.value = null;
+          _removeCustomerSuggestionsOverlay();
+        }
+        _customerSuggestionsDismissTimer = null;
+      });
+    }
     _customerPhoneFocusNode.addListener(() {
-      if (!_customerPhoneFocusNode.hasFocus && mounted) {
-        _customerSuggestionsDismissTimer?.cancel();
-        _customerSuggestionsDismissTimer = Timer(const Duration(milliseconds: 250), () {
-          if (mounted) {
-            _customerPhoneSuggestionsNotifier.value = null;
-            _removeCustomerSuggestionsOverlay();
-          }
-          _customerSuggestionsDismissTimer = null;
-        });
-      }
+      if (!_customerPhoneFocusNode.hasFocus && mounted) dismissSuggestionsOnFocusLost();
+    });
+    _customerNameFocusNode.addListener(() {
+      if (!_customerNameFocusNode.hasFocus && mounted) dismissSuggestionsOnFocusLost();
     });
     // Barcode Master: máy quét Bluetooth/USB gửi mã + Enter; tự động thêm vào giỏ không cần nhấn Enter
     _productSearchController.addListener(_onProductSearchInputForBarcode);
@@ -207,6 +214,7 @@ class _SalesScreenState extends State<SalesScreen> {
     _removeCustomerSuggestionsOverlay();
     _customerPhoneSuggestionsNotifier.dispose();
     _customerPhoneFocusNode.dispose();
+    _customerNameFocusNode.dispose();
     _leftPanelScrollController.dispose();
     _productSearchController.dispose();
     _customerSearchController.dispose();
@@ -300,19 +308,61 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
+  /// Xử lý khi nhập tên khách hàng - Gợi ý từ 1 ký tự (giống SĐT nhưng trigger sớm hơn).
+  void _onCustomerNameChanged(String name) {
+    _customerSearchDebounce?.cancel();
+    final trimmed = name.trim();
+    final salesProvider = context.read<SalesProvider>();
+    final selected = salesProvider.getSelectedCustomer(_activeTabId);
+
+    if (trimmed.isEmpty) {
+      _customerPhoneSuggestionsNotifier.value = null;
+      _removeCustomerSuggestionsOverlay();
+      if (selected != null) {
+        salesProvider.clearCustomerSelection(tabId: _activeTabId);
+        _customerPhoneController.clear();
+        _customerAddressController.clear();
+        _customerTaxCodeController.clear();
+      }
+      return;
+    }
+
+    if (selected != null && trimmed != selected.name.trim()) {
+      salesProvider.clearCustomerSelection(tabId: _activeTabId);
+      _customerPhoneController.clear();
+      _customerAddressController.clear();
+      _customerTaxCodeController.clear();
+    }
+
+    _customerSearchDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      final salesProvider = context.read<SalesProvider>();
+      final customers = await salesProvider.searchCustomers(trimmed);
+      if (!mounted) return;
+      _customerPhoneSuggestionsNotifier.value = customers.isEmpty ? null : customers;
+      if (customers.isNotEmpty) {
+        _removeCustomerSuggestionsOverlay();
+        _showCustomerSuggestionsOverlay(customers, salesProvider, anchorIsName: true);
+      } else {
+        _removeCustomerSuggestionsOverlay();
+      }
+    });
+  }
+
   void _removeCustomerSuggestionsOverlay() {
     _customerSuggestionsOverlayEntry?.remove();
     _customerSuggestionsOverlayEntry = null;
   }
 
-  /// Hiện popup gợi ý trong Overlay, sát ngay dưới ô SĐT (dùng GlobalKey để lấy vị trí).
-  void _showCustomerSuggestionsOverlay(List<CustomerModel> list, SalesProvider salesProvider) {
+  /// Hiện popup gợi ý trong Overlay. [anchorIsName] true = gắn dưới ô tên, false = dưới ô SĐT.
+  void _showCustomerSuggestionsOverlay(List<CustomerModel> list, SalesProvider salesProvider, {bool anchorIsName = false}) {
     final overlay = Overlay.of(context);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      // Dùng key tương ứng với widget đang hiển thị (mobile bottom sheet hoặc desktop panel)
-      final ctx = _customerPhoneFieldKeyDesktop.currentContext ?? _customerPhoneFieldKeyMobile.currentContext;
-      final box = ctx?.findRenderObject() as RenderBox?;
+      final key = anchorIsName
+          ? (_customerNameFieldKeyDesktop.currentContext ?? _customerNameFieldKeyMobile.currentContext)
+          : (_customerPhoneFieldKeyDesktop.currentContext ?? _customerPhoneFieldKeyMobile.currentContext);
+      final box = key?.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize) return;
 
       final pos = box.localToGlobal(Offset.zero);
@@ -343,7 +393,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 return ListTile(
                   dense: true,
                   title: Text(
-                    c.phone,
+                    anchorIsName ? c.name : c.phone,
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -351,7 +401,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     ),
                   ),
                   subtitle: Text(
-                    c.name,
+                    anchorIsName ? c.phone : c.name,
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey[600],
@@ -1424,19 +1474,17 @@ class _SalesScreenState extends State<SalesScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _customerNameController,
-                    decoration: _mobileInputDecoration(AppLocalizations.of(context)!.customerName),
-                    onChanged: (v) {
-                      final selected = salesProvider.getSelectedCustomer(_activeTabId);
-                      if (selected != null && v.trim() != selected.name.trim()) {
-                        salesProvider.clearCustomerSelection(tabId: _activeTabId);
-                        _customerPhoneController.clear();
-                        _customerAddressController.clear();
-                        _customerTaxCodeController.clear();
-                      }
-                      salesProvider.setCustomerName(v.isEmpty ? null : v, tabId: _activeTabId);
-                    },
+                  RepaintBoundary(
+                    key: _customerNameFieldKeyMobile,
+                    child: TextField(
+                      controller: _customerNameController,
+                      focusNode: _customerNameFocusNode,
+                      decoration: _mobileInputDecoration(AppLocalizations.of(context)!.customerName),
+                      onChanged: (v) {
+                        salesProvider.setCustomerName(v.isEmpty ? null : v, tabId: _activeTabId);
+                        _onCustomerNameChanged(v);
+                      },
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -2581,37 +2629,35 @@ class _SalesScreenState extends State<SalesScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 18),
-                                    // Tên khách hàng
-                                    TextField(
-                                      controller: _customerNameController,
-                                      decoration: InputDecoration(
-                                        labelText: AppLocalizations.of(context)!.customerName,
-                                        labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(8),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                    // Tên khách hàng - Gợi ý từ 1 ký tự
+                                    RepaintBoundary(
+                                      key: _customerNameFieldKeyDesktop,
+                                      child: TextField(
+                                        controller: _customerNameController,
+                                        focusNode: _customerNameFocusNode,
+                                        decoration: InputDecoration(
+                                          labelText: AppLocalizations.of(context)!.customerName,
+                                          labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                         ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(8),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(8),
-                                          borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
-                                        ),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                        style: const TextStyle(fontSize: 15),
+                                        onChanged: (value) {
+                                          salesProvider.setCustomerName(value.isEmpty ? null : value, tabId: _activeTabId);
+                                          _onCustomerNameChanged(value);
+                                        },
                                       ),
-                                      style: const TextStyle(fontSize: 15),
-                                      onChanged: (value) {
-                                        final selected = salesProvider.getSelectedCustomer(_activeTabId);
-                                        if (selected != null && value.trim() != selected.name.trim()) {
-                                          salesProvider.clearCustomerSelection(tabId: _activeTabId);
-                                          _customerPhoneController.clear();
-                                          _customerAddressController.clear();
-                                          _customerTaxCodeController.clear();
-                                        }
-                                        salesProvider.setCustomerName(value.isEmpty ? null : value, tabId: _activeTabId);
-                                      },
                                     ),
                                     const SizedBox(height: 18),
                                     // Địa chỉ
@@ -3509,7 +3555,9 @@ class _SalesScreenState extends State<SalesScreen> {
             // Thêm listener một lần để cập nhật preview khi text thay đổi
             if (!listenerAdded) {
               discountController.addListener(() {
-                setState(() {}); // Rebuild để cập nhật preview
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) setState(() {}); // Rebuild để cập nhật preview
+                });
               });
               listenerAdded = true;
             }

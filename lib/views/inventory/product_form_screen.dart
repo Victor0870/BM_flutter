@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../controllers/product_provider.dart';
 import '../../controllers/auth_provider.dart';
+import '../../controllers/branch_provider.dart';
 import '../../models/product_model.dart';
+import '../../models/branch_model.dart';
 import '../../models/unit_conversion.dart';
 import '../../models/category_model.dart';
 import '../../utils/platform_utils.dart';
@@ -281,6 +284,116 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             child: Text(index != null ? 'Cập nhật' : 'Thêm'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showStockCardSheet(BuildContext context) {
+    final product = widget.product;
+    if (product == null) return;
+
+    Map<String, double> stockByBranch = Map<String, double>.from(product.branchStock);
+    if (product.variants.isNotEmpty) {
+      stockByBranch = {};
+      for (final v in product.variants) {
+        v.branchStock.forEach((branchId, qty) {
+          stockByBranch[branchId] = (stockByBranch[branchId] ?? 0) + qty;
+        });
+      }
+    }
+
+    final branchProvider = context.read<BranchProvider>();
+    final branches = branchProvider.branches.where((b) => b.isActive).toList();
+    final branchIds = <String>{...stockByBranch.keys};
+    for (final b in branches) {
+      branchIds.add(b.id);
+    }
+    if (stockByBranch.isEmpty && branches.isEmpty) {
+      branchIds.add(kMainStoreBranchId);
+    }
+
+    final fmt = NumberFormat('#,###');
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.4,
+        minChildSize: 0.25,
+        maxChildSize: 0.85,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Thẻ kho',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Xong'),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                  children: [
+                    ...branchIds.map((branchId) {
+                      final match = branches.where((b) => b.id == branchId);
+                      final name = branchId == kMainStoreBranchId
+                          ? 'Cửa hàng chính'
+                          : (match.isEmpty ? branchId : match.first.name);
+                      final qty = stockByBranch[branchId] ?? 0.0;
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        trailing: Text(
+                          fmt.format(qty.toInt()),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -726,8 +839,29 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.product != null;
     return Scaffold(
+      backgroundColor: _useMobileLayout ? Colors.white : null,
       appBar: AppBar(
-        title: Text(isEdit ? 'Sửa sản phẩm' : 'Thêm sản phẩm mới'),
+        title: Text(
+          isEdit ? 'Sửa sản phẩm' : 'Thêm sản phẩm mới',
+          style: _useMobileLayout
+              ? const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E293B),
+                )
+              : null,
+        ),
+        backgroundColor: _useMobileLayout ? Colors.white : null,
+        foregroundColor: _useMobileLayout ? const Color(0xFF1E293B) : null,
+        elevation: _useMobileLayout ? 0 : null,
+        scrolledUnderElevation: _useMobileLayout ? 0.5 : null,
+        centerTitle: _useMobileLayout,
+        leading: _useMobileLayout
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
       ),
       body: Consumer2<ProductProvider, AuthProvider>(
         builder: (context, productProvider, authProvider, _) {
@@ -779,6 +913,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             },
             onRemoveUnit: (index) => setState(() => _units.removeAt(index)),
             requestRebuild: () => setState(() {}),
+            onShowStockCard: (isEdit && widget.product != null) ? () => _showStockCardSheet(context) : null,
           );
           if (_useMobileLayout) {
             return ProductFormScreenMobile(params: params);

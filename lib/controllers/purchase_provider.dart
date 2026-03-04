@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/product_model.dart';
 import '../models/purchase_model.dart';
+import '../models/branch_model.dart';
 import '../services/purchase_service.dart';
 import '../services/product_service.dart';
 import 'auth_provider.dart';
@@ -166,7 +167,9 @@ class PurchaseProvider with ChangeNotifier {
         items: cartItems,
         status: complete ? 'COMPLETED' : 'DRAFT',
         userId: authProvider.user!.uid,
-        branchId: branchProvider?.currentBranchId ?? authProvider.selectedBranchId ?? '',
+        branchId: authProvider.isBasic
+            ? kMainStoreBranchId
+            : (branchProvider?.currentBranchId ?? authProvider.selectedBranchId ?? kMainStoreBranchId),
       );
 
       // Lưu phiếu nhập (nếu COMPLETED sẽ tự động cập nhật stock)

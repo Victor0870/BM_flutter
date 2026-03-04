@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +35,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   bool get _useMobileLayout => widget.forceMobile ?? isMobilePlatform;
 
   final _formKey = GlobalKey<FormState>();
+  final GlobalKey _guideTileKey = GlobalKey();
   
   // Controllers cho form
   final _nameController = TextEditingController();
@@ -63,6 +66,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   bool _autoConfirmPayment = true; // Tự động xác nhận tiền về
   
   // Cấu hình KiotViet (chỉ hiển thị khi shop.isKiotVietEnabled == true)
+  final _kiotRetailerController = TextEditingController();
   final _kiotClientIdController = TextEditingController();
   final _kiotClientSecretController = TextEditingController();
   bool _syncWithKiotViet = false;
@@ -88,6 +92,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   
   bool _isLoading = false;
   bool _isUploadingLogo = false;
+  bool _isUploadingKiotVietFile = false;
   bool _obscurePassword = true;
   bool _obscurePayosApiKey = true;
   bool _obscurePayosChecksumKey = true;
@@ -97,8 +102,10 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // Load data sau khi widget được build xong
+    // Đăng ký key và load data sau khi build xong để tránh setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<TutorialProvider>().registerSettingsGuideTileKey(_guideTileKey);
       if (!_hasLoadedOnce) {
         _loadShopData();
         _hasLoadedOnce = true;
@@ -111,12 +118,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     if (!mounted) return;
     final tutorialProvider = context.read<TutorialProvider>();
     if (!tutorialProvider.shouldHighlightGuideInSettings) return;
-    final keys = TutorialKeys.instance;
+    final keyTarget = tutorialProvider.settingsGuideTileKey ?? TutorialKeys.instance.keySettingsGuideTile;
     final tutorial = TutorialCoachMark(
       targets: [
         TargetFocus(
           identify: 'guide_tile',
-          keyTarget: keys.keySettingsGuideTile,
+          keyTarget: keyTarget,
           contents: [
             TargetContent(
               align: ContentAlign.bottom,
@@ -160,6 +167,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     _bankBinController.dispose();
     _bankAccountNumberController.dispose();
     _bankAccountNameController.dispose();
+    _kiotRetailerController.dispose();
     _kiotClientIdController.dispose();
     _kiotClientSecretController.dispose();
     _vatRateController.dispose();
@@ -170,6 +178,8 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     _vietqrBankBinController.dispose();
     _vietqrBankNameController.dispose();
     _vietqrAccountNameController.dispose();
+    final tp = context.read<TutorialProvider>();
+    if (tp.settingsGuideTileKey == _guideTileKey) tp.clearSettingsGuideTileKey();
     super.dispose();
   }
 
@@ -291,6 +301,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
         _vietqrAccountNameController.text = shop.vietqrAccountName ?? '';
         // Load cấu hình KiotViet
         _syncWithKiotViet = shop.syncWithKiotViet;
+        _kiotRetailerController.text = shop.kiotRetailer ?? '';
         _kiotClientIdController.text = shop.kiotClientId ?? '';
         _kiotClientSecretController.text = shop.kiotClientSecret ?? '';
       });
@@ -497,6 +508,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
             : _vietqrAccountNameController.text.trim(),
         // Cập nhật cấu hình KiotViet
         syncWithKiotViet: _syncWithKiotViet,
+        kiotRetailer: _kiotRetailerController.text.trim().isEmpty
+            ? null
+            : _kiotRetailerController.text.trim(),
         kiotClientId: _kiotClientIdController.text.trim().isEmpty
             ? null
             : _kiotClientIdController.text.trim(),
@@ -632,6 +646,55 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       }
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
+    }
+  }
+
+  /// Chỉ gọi từ desktop khi syncWithKiotViet = true. Chọn file .xlsx, parse nội dung và lưu lên Firestore (WriteBatch).
+  Future<void> _pickAndUploadKiotVietFile(BuildContext context) async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.shop == null) return;
+    final shopId = authProvider.shop!.id;
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty || !context.mounted) return;
+
+    final bytes = result.files.single.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Không đọc được nội dung file. Vui lòng chọn file .xlsx khác.')),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isUploadingKiotVietFile = true);
+    try {
+      final firebaseService = FirebaseService();
+      await firebaseService.saveKiotVietExcelContentToFirestore(shopId, bytes);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Đã lưu nội dung Excel lên Firebase thành công.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('Error uploading KiotViet Excel file: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Lỗi tải lên: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploadingKiotVietFile = false);
     }
   }
 
@@ -1514,91 +1577,93 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Cấu hình Máy in
-              Card(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Icon(Icons.print, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 12),
-                          const Text(
-                            'Cấu hình Máy in',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Khổ giấy mặc định',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButton<int>(
-                            value: _printerPaperSizeMm,
-                            isExpanded: true,
-                            items: const [
-                              DropdownMenuItem(value: 58, child: Text('Khổ 58mm (K58)')),
-                              DropdownMenuItem(value: 80, child: Text('Khổ 80mm (K80)')),
-                            ],
-                            onChanged: _isLoading
-                                ? null
-                                : (value) {
-                                    if (value != null) setState(() => _printerPaperSizeMm = value);
-                                  },
-                          ),
-                          const SizedBox(height: 16),
-                          SwitchListTile(
-                            title: const Text('Tự động in sau khi thanh toán'),
-                            subtitle: Text(
-                              _autoPrintAfterPayment
-                                  ? 'Hệ thống sẽ mở hộp thoại in hóa đơn ngay khi đơn hàng hoàn tất'
-                                  : 'Chỉ in khi bạn chọn in từ chi tiết đơn hàng',
-                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                            ),
-                            value: _autoPrintAfterPayment,
-                            onChanged: _isLoading
-                                ? null
-                                : (value) {
-                                    setState(() => _autoPrintAfterPayment = value);
-                                  },
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                          if (isDesktopPlatform) ...[
-                            const SizedBox(height: 8),
-                            TextFormField(
-                              controller: _printerNameController,
-                              decoration: const InputDecoration(
-                                labelText: 'Tên máy in',
-                                hintText: 'Ví dụ: POS-58',
-                                helperText: 'Dùng cho Silent Print đúng thiết bị trên Desktop',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.print_outlined),
+              // Cấu hình Máy in: chỉ hiển thị trên desktop; mobile dùng màn Thiết lập máy in (More → Thiết lập máy in)
+              if (!_useMobileLayout) ...[
+                Card(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Icon(Icons.print, color: Theme.of(context).colorScheme.primary),
+                            const SizedBox(width: 12),
+                            const Text(
+                              'Cấu hình Máy in',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Khổ giấy mặc định',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            DropdownButton<int>(
+                              value: _printerPaperSizeMm,
+                              isExpanded: true,
+                              items: const [
+                                DropdownMenuItem(value: 58, child: Text('Khổ 58mm (K58)')),
+                                DropdownMenuItem(value: 80, child: Text('Khổ 80mm (K80)')),
+                              ],
+                              onChanged: _isLoading
+                                  ? null
+                                  : (value) {
+                                      if (value != null) setState(() => _printerPaperSizeMm = value);
+                                    },
+                            ),
+                            const SizedBox(height: 16),
+                            SwitchListTile(
+                              title: const Text('Tự động in sau khi thanh toán'),
+                              subtitle: Text(
+                                _autoPrintAfterPayment
+                                    ? 'Hệ thống sẽ mở hộp thoại in hóa đơn ngay khi đơn hàng hoàn tất'
+                                    : 'Chỉ in khi bạn chọn in từ chi tiết đơn hàng',
+                                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                              ),
+                              value: _autoPrintAfterPayment,
+                              onChanged: _isLoading
+                                  ? null
+                                  : (value) {
+                                      setState(() => _autoPrintAfterPayment = value);
+                                    },
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                            if (isDesktopPlatform) ...[
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: _printerNameController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Tên máy in',
+                                  hintText: 'Ví dụ: POS-58',
+                                  helperText: 'Dùng cho Silent Print đúng thiết bị trên Desktop',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.print_outlined),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
+              ],
 
               // Tùy chỉnh nội dung hóa đơn
               Card(
@@ -1922,6 +1987,16 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                 child: Column(
                                   children: [
                                     TextFormField(
+                                      controller: _kiotRetailerController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Tên kết nối KiotViet (Retailer)',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.store),
+                                        helperText: 'Ví dụ: danganhauto — dùng cho header API KiotViet',
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    TextFormField(
                                       controller: _kiotClientIdController,
                                       decoration: const InputDecoration(
                                         labelText: 'KiotViet Client ID',
@@ -1948,7 +2023,75 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      // Chỉ desktop + syncWithKiotViet: card lưu Excel (nút Tra dữ liệu nằm ngoài sidebar, trong layout chính)
+                      if (isDesktopPlatform && _syncWithKiotViet) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.table_chart, color: Theme.of(context).colorScheme.primary),
+                                    const SizedBox(width: 12),
+                                    const Text(
+                                      'Nội dung Excel KiotViet (Data base danganh.xlsx)',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  'Chọn file Excel để lưu nội dung (sheets, cột, dòng) lên Firestore. Có thể chọn lại file để cập nhật.',
+                                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                                ),
+                                const SizedBox(height: 12),
+                                FutureBuilder<Map<String, dynamic>?>(
+                                  future: authProvider.shop != null
+                                      ? FirebaseService().getKiotVietFileMeta(authProvider.shop!.id)
+                                      : Future.value(null),
+                                  builder: (context, snapshot) {
+                                    if (snapshot.hasData && snapshot.data != null) {
+                                      final uploadedAt = snapshot.data!['uploadedAt'];
+                                      String? text;
+                                      if (uploadedAt != null && uploadedAt is Timestamp) {
+                                        final dt = uploadedAt.toDate();
+                                        text = 'Đã tải lên: ${dt.day}/${dt.month}/${dt.year} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+                                      }
+                                      if (text != null) {
+                                        return Padding(
+                                          padding: const EdgeInsets.only(bottom: 12),
+                                          child: Text(text, style: TextStyle(fontSize: 13, color: Colors.green[700])),
+                                        );
+                                      }
+                                    }
+                                    return const SizedBox.shrink();
+                                  },
+                                ),
+                                ElevatedButton.icon(
+                                  onPressed: _isUploadingKiotVietFile
+                                      ? null
+                                      : () => _pickAndUploadKiotVietFile(context),
+                                  icon: _isUploadingKiotVietFile
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.save_alt, size: 20),
+                                  label: Text(_isUploadingKiotVietFile ? 'Đang lưu nội dung...' : 'Chọn file và lưu nội dung / Cập nhật'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                     ],
                   );
                 },
@@ -2081,7 +2224,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
               // Hướng dẫn sử dụng
               Card(
                 child: ListTile(
-                  key: TutorialKeys.instance.keySettingsGuideTile,
+                  key: _guideTileKey,
                   leading: Icon(Icons.menu_book_rounded, color: Theme.of(context).colorScheme.primary),
                   title: Text(
                     AppLocalizations.of(context)!.userGuide,
