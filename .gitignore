@@ -46,3 +46,6 @@ app.*.map.json
 
 # Keystore credentials (không commit mật khẩu)
 /android/key.properties
+
+# Local script (không đưa lên repo)
+Nova_ai.py
