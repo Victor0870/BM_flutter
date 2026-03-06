@@ -296,7 +296,7 @@ class _TransferScreenState extends State<TransferScreen> {
             _sidebarLabel('Chuyển tới'),
             const SizedBox(height: 4),
             DropdownButtonFormField<String>(
-              value: transferProvider.toBranchId != null && toBranches.any((b) => b.id == transferProvider.toBranchId)
+              initialValue: transferProvider.toBranchId != null && toBranches.any((b) => b.id == transferProvider.toBranchId)
                   ? transferProvider.toBranchId
                   : null,
               decoration: InputDecoration(

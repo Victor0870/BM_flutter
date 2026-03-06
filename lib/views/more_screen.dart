@@ -5,6 +5,7 @@ import '../../controllers/branch_provider.dart';
 import '../../core/routes.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/branch_model.dart';
+import '../../widgets/change_password_dialog.dart';
 import '../../widgets/pro_required_dialog.dart';
 
 /// Màn hình "Nhiều hơn" (More) - hub các chức năng và cài đặt, bố cục tương tự KiotViet More.
@@ -57,7 +58,7 @@ class MoreScreen extends StatelessWidget {
               title: l10n.partners,
               items: [
                 _MenuItem(icon: Icons.people, label: l10n.customers, onTap: () => Navigator.pushNamed(context, AppRoutes.customerManagement)),
-                _MenuItem(icon: Icons.business_center, label: l10n.suppliers, onTap: () {}),
+                _MenuItem(icon: Icons.business_center, label: l10n.suppliers, onTap: () => Navigator.pushNamed(context, AppRoutes.suppliers)),
               ],
               crossAxisCount: 2,
             ),
@@ -191,12 +192,6 @@ class MoreScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 20),
-                onPressed: () {},
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -210,6 +205,23 @@ class MoreScreen extends StatelessWidget {
                   Icon(Icons.person_outline, size: 20, color: Colors.grey[700]),
                   const SizedBox(width: 10),
                   Text(l10n.accountInfo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                  const Spacer(),
+                  Icon(Icons.chevron_right, size: 20, color: Colors.grey[600]),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          InkWell(
+            onTap: () => showChangePasswordDialog(context),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_reset, size: 20, color: Colors.grey[700]),
+                  const SizedBox(width: 10),
+                  const Text('Đổi mật khẩu', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                   const Spacer(),
                   Icon(Icons.chevron_right, size: 20, color: Colors.grey[600]),
                 ],

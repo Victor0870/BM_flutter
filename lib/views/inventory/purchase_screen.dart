@@ -10,6 +10,9 @@ import '../../models/product_model.dart';
 import '../../models/purchase_model.dart';
 import '../../models/branch_model.dart';
 import '../../models/unit_conversion.dart';
+import '../../models/supplier_model.dart';
+import '../../services/supplier_service.dart';
+import '../../core/routes.dart';
 import '../../utils/platform_utils.dart';
 import '../../widgets/responsive_container.dart';
 
@@ -362,11 +365,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           const SizedBox(height: 22),
           _buildMobileLabel('Nhà cung cấp *'),
           const SizedBox(height: 6),
-          TextField(
-            controller: _supplierNameController,
-            decoration: _mobileInputDecoration('Nhập tên nhà cung cấp'),
-            onChanged: (value) => context.read<PurchaseProvider>().setSupplierName(value),
-          ),
+          _buildMobileSupplierField(context),
           const SizedBox(height: 18),
           _buildMobileLabel('Chi nhánh nhập *'),
           const SizedBox(height: 6),
@@ -447,6 +446,220 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMobileSupplierField(BuildContext context) {
+    final purchaseProvider = context.read<PurchaseProvider>();
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, _) {
+        final userId = authProvider.user?.uid;
+        if (userId == null) {
+          return TextField(
+            controller: _supplierNameController,
+            decoration: _mobileInputDecoration('Nhập tên nhà cung cấp'),
+            onChanged: (v) => purchaseProvider.setSupplierName(v),
+          );
+        }
+        final service = SupplierService(userId: userId);
+        return StreamBuilder<List<SupplierModel>>(
+          stream: service.streamByShop(),
+          builder: (context, snapshot) {
+            final list = snapshot.data ?? [];
+            if (list.isEmpty) {
+              return TextField(
+                controller: _supplierNameController,
+                decoration: _mobileInputDecoration('Nhập tên nhà cung cấp'),
+                onChanged: (v) => purchaseProvider.setSupplierName(v),
+              );
+            }
+            final selectedFromList = list.where((s) => s.name == purchaseProvider.supplierName).firstOrNull;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<SupplierModel?>(
+                  initialValue: selectedFromList,
+                  decoration: _mobileInputDecoration('Chọn nhà cung cấp').copyWith(
+                    prefixIcon: const Icon(Icons.business_center_outlined, size: 22, color: Color(0xFF64748B)),
+                  ),
+                  items: [
+                    ...list.map((s) => DropdownMenuItem<SupplierModel?>(value: s, child: Text(s.name))),
+                    const DropdownMenuItem<SupplierModel?>(value: null, child: Text('Nhập tên khác')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      purchaseProvider.setSupplierName(v.name);
+                      _supplierNameController.text = v.name;
+                    }
+                  },
+                ),
+                if (selectedFromList == null) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _supplierNameController,
+                    decoration: _mobileInputDecoration('Nhập tên nhà cung cấp'),
+                    onChanged: (v) => purchaseProvider.setSupplierName(v),
+                  ),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDesktopSupplierField(BuildContext context, PurchaseProvider purchaseProvider) {
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, _) {
+        final userId = authProvider.user?.uid;
+        if (userId == null) {
+          return TextField(
+            controller: _supplierNameController,
+            decoration: InputDecoration(
+              hintText: 'Nhập tên nhà cung cấp',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: IconButton(icon: const Icon(Icons.add), onPressed: () => Navigator.pushNamed(context, AppRoutes.supplierForm), tooltip: 'Thêm nhà cung cấp'),
+              isDense: true,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+            onChanged: (v) => purchaseProvider.setSupplierName(v),
+          );
+        }
+        final service = SupplierService(userId: userId);
+        return StreamBuilder<List<SupplierModel>>(
+          stream: service.streamByShop(),
+          builder: (context, snapshot) {
+            final list = snapshot.data ?? [];
+            final selectedFromList = list.where((s) => s.name == purchaseProvider.supplierName).firstOrNull;
+            if (list.isEmpty) {
+              return TextField(
+                controller: _supplierNameController,
+                decoration: InputDecoration(
+                  hintText: 'Nhập tên nhà cung cấp',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: IconButton(icon: const Icon(Icons.add), onPressed: () => Navigator.pushNamed(context, AppRoutes.supplierForm), tooltip: 'Thêm nhà cung cấp'),
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+                onChanged: (v) => purchaseProvider.setSupplierName(v),
+              );
+            }
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<SupplierModel?>(
+                  initialValue: selectedFromList,
+                  decoration: InputDecoration(
+                    hintText: 'Chọn nhà cung cấp',
+                    prefixIcon: const Icon(Icons.business_center_outlined, size: 20),
+                    suffixIcon: IconButton(icon: const Icon(Icons.add), onPressed: () => Navigator.pushNamed(context, AppRoutes.supplierForm), tooltip: 'Thêm nhà cung cấp'),
+                    isDense: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  items: [
+                    ...list.map((s) => DropdownMenuItem<SupplierModel?>(value: s, child: Text(s.name))),
+                    const DropdownMenuItem<SupplierModel?>(value: null, child: Text('Nhập tên khác')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      purchaseProvider.setSupplierName(v.name);
+                      _supplierNameController.text = v.name;
+                    }
+                  },
+                ),
+                if (selectedFromList == null) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _supplierNameController,
+                    decoration: InputDecoration(
+                      hintText: 'Nhập tên nhà cung cấp',
+                      isDense: true,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                    onChanged: (v) => purchaseProvider.setSupplierName(v),
+                  ),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFormSupplierField(BuildContext context) {
+    final purchaseProvider = context.read<PurchaseProvider>();
+    final decoration = InputDecoration(
+      labelText: 'Nhà cung cấp *',
+      hintText: 'Nhập tên nhà cung cấp',
+      prefixIcon: const Icon(Icons.business),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    );
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, _) {
+        final userId = authProvider.user?.uid;
+        if (userId == null) {
+          return TextField(
+            controller: _supplierNameController,
+            decoration: decoration,
+            onChanged: (v) => purchaseProvider.setSupplierName(v),
+          );
+        }
+        final service = SupplierService(userId: userId);
+        return StreamBuilder<List<SupplierModel>>(
+          stream: service.streamByShop(),
+          builder: (context, snapshot) {
+            final list = snapshot.data ?? [];
+            if (list.isEmpty) {
+              return TextField(
+                controller: _supplierNameController,
+                decoration: decoration,
+                onChanged: (v) => purchaseProvider.setSupplierName(v),
+              );
+            }
+            final selectedFromList = list.where((s) => s.name == purchaseProvider.supplierName).firstOrNull;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<SupplierModel?>(
+                  initialValue: selectedFromList,
+                  decoration: decoration.copyWith(hintText: 'Chọn nhà cung cấp'),
+                  items: [
+                    ...list.map((s) => DropdownMenuItem<SupplierModel?>(value: s, child: Text(s.name))),
+                    const DropdownMenuItem<SupplierModel?>(value: null, child: Text('Nhập tên khác')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      purchaseProvider.setSupplierName(v.name);
+                      _supplierNameController.text = v.name;
+                    }
+                  },
+                ),
+                if (selectedFromList == null) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _supplierNameController,
+                    decoration: decoration,
+                    onChanged: (v) => purchaseProvider.setSupplierName(v),
+                  ),
+                ],
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -783,19 +996,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
-              controller: _supplierNameController,
-              decoration: InputDecoration(
-                hintText: 'Tìm nhà cung cấp',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: IconButton(icon: const Icon(Icons.add), onPressed: () {}, tooltip: 'Thêm nhà cung cấp'),
-                isDense: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                filled: true,
-                fillColor: Colors.white,
-              ),
-              onChanged: (v) => purchaseProvider.setSupplierName(v),
-            ),
+            _buildDesktopSupplierField(context, purchaseProvider),
             const SizedBox(height: 16),
             _sidebarLabel('Mã phiếu nhập'),
             const SizedBox(height: 4),
@@ -952,20 +1153,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                         child: Column(
                           children: [
                             // Nhà cung cấp
-                            TextField(
-                    controller: _supplierNameController,
-                    decoration: InputDecoration(
-                      labelText: 'Nhà cung cấp *',
-                      hintText: 'Nhập tên nhà cung cấp',
-                      prefixIcon: const Icon(Icons.business),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onChanged: (value) {
-                      context.read<PurchaseProvider>().setSupplierName(value);
-                    },
-                  ),
+                            _buildFormSupplierField(context),
                   const SizedBox(height: 12),
                   // Chi nhánh nhập kho: Basic = chỉ Cửa hàng chính; Pro = chọn được, mặc định Cửa hàng chính nếu chưa có thêm chi nhánh
                   Align(

@@ -22,6 +22,8 @@ class PermissionRoutes {
     AppRoutes.serviceGroup: EmployeePermissions.viewInventory,
     AppRoutes.stockOverview: EmployeePermissions.viewInventory,
     AppRoutes.purchase: EmployeePermissions.manageInventory,
+    AppRoutes.suppliers: EmployeePermissions.manageInventory,
+    AppRoutes.supplierForm: EmployeePermissions.manageInventory,
     AppRoutes.transferStock: EmployeePermissions.manageInventory,
     AppRoutes.adjustStock: EmployeePermissions.manageInventory,
     AppRoutes.inventoryReport: EmployeePermissions.viewReports,

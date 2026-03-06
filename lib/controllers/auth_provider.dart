@@ -489,6 +489,68 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Gửi email đặt lại mật khẩu (quên mật khẩu)
+  Future<bool> sendPasswordResetEmail(String email) async {
+    if (!_isFirebaseReady) {
+      _errorMessage = 'Firebase chưa sẵn sàng. Vui lòng thử lại sau.';
+      notifyListeners();
+      return false;
+    }
+    try {
+      _errorMessage = null;
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email.trim());
+      notifyListeners();
+      return true;
+    } on FirebaseAuthException catch (e) {
+      _errorMessage = _getAuthErrorMessage(e.code);
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _errorMessage = 'Gửi email thất bại: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Đổi mật khẩu (user đã đăng nhập): xác thực lại rồi cập nhật mật khẩu mới
+  Future<bool> changePassword(String currentPassword, String newPassword) async {
+    final user = _user;
+    if (user == null || user.email == null || user.email!.isEmpty) {
+      _errorMessage = 'Chưa đăng nhập hoặc tài khoản không có email.';
+      notifyListeners();
+      return false;
+    }
+    if (newPassword.length < 6) {
+      _errorMessage = 'Mật khẩu mới cần ít nhất 6 ký tự.';
+      notifyListeners();
+      return false;
+    }
+    try {
+      _isLoading = true;
+      _errorMessage = null;
+      notifyListeners();
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+      await user.updatePassword(newPassword);
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } on FirebaseAuthException catch (e) {
+      _isLoading = false;
+      _errorMessage = _getAuthErrorMessage(e.code);
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = 'Đổi mật khẩu thất bại: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Lưu email + mật khẩu (chỉ gọi trên Mobile)
   Future<void> _saveRememberedCredentials(String email, String password) async {
     try {

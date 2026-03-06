@@ -38,6 +38,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _barcodeController = TextEditingController();
   final _categoryController = TextEditingController(); // Backward compatibility
   final _manufacturerController = TextEditingController();
+  final _descriptionController = TextEditingController();
   final _skuController = TextEditingController();
   final _imageUrlController = TextEditingController();
   final _minStockController = TextEditingController();
@@ -91,6 +92,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _barcodeController.text = product.barcode ?? '';
     _categoryController.text = product.category ?? ''; // Backward compatibility
     _manufacturerController.text = product.manufacturer ?? '';
+    _descriptionController.text = product.description ?? '';
     _skuController.text = product.sku ?? '';
     _imageUrlController.text = product.imageUrl ?? '';
     _minStockController.text = product.minStock?.toStringAsFixed(0) ?? '';
@@ -113,6 +115,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _barcodeController.dispose();
     _categoryController.dispose();
     _manufacturerController.dispose();
+    _descriptionController.dispose();
     _skuController.dispose();
     _imageUrlController.dispose();
     _minStockController.dispose();
@@ -488,6 +491,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _stockController.text = '0';
         _barcodeController.clear();
         _manufacturerController.clear();
+        _descriptionController.clear();
         _skuController.clear();
         _imageUrlController.clear();
         _minStockController.clear();
@@ -601,6 +605,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       imageUrl: _imageUrlController.text.trim().isEmpty
           ? null
           : _imageUrlController.text.trim(),
+      description: _descriptionController.text.trim().isEmpty
+          ? null
+          : _descriptionController.text.trim(),
       minStock: _minStockController.text.trim().isEmpty
           ? null
           : double.tryParse(_minStockController.text),
@@ -880,6 +887,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             barcodeController: _barcodeController,
             categoryController: _categoryController,
             manufacturerController: _manufacturerController,
+            descriptionController: _descriptionController,
             skuController: _skuController,
             imageUrlController: _imageUrlController,
             minStockController: _minStockController,

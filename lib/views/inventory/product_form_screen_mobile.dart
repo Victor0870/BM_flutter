@@ -451,28 +451,112 @@ class ProductFormScreenMobile extends StatelessWidget {
   }
 
   Widget _buildDescriptionCard(BuildContext context, Color primary) {
+    final desc = params.descriptionController.text.trim();
     return _card(
       sectionTitle: 'MÔ TẢ',
       primary: primary,
-      onEdit: () {
-        // Mô tả: có thể dùng category text hoặc để trống
-        params.requestRebuild();
-      },
+      onEdit: () => _showDescriptionSheet(context),
       child: InkWell(
-        onTap: () {},
+        onTap: () => _showDescriptionSheet(context),
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(Icons.description_outlined, size: 20, color: primary),
               const SizedBox(width: 8),
-              Text('Thêm mô tả', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: primary)),
+              Expanded(
+                child: Text(
+                  desc.isEmpty ? 'Thêm mô tả' : desc,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: desc.isEmpty ? FontWeight.w500 : FontWeight.w400,
+                    color: desc.isEmpty ? primary : const Color(0xFF334155),
+                  ),
+                  maxLines: desc.isEmpty ? 1 : 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
             ],
           ),
         ),
       ),
     );
+  }
+
+  void _showDescriptionSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + MediaQuery.of(context).viewPadding.bottom),
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: _blueLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.description_outlined, size: 24, color: _bluePrimary),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Mô tả sản phẩm',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _bluePrimary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    child: const Text('Xong'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _sheetLabel('Nội dung mô tả (tùy chọn)'),
+              TextFormField(
+                controller: params.descriptionController,
+                decoration: _sheetInputDecoration('Nhập mô tả sản phẩm...').copyWith(
+                  alignLabelWithHint: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+                maxLines: 6,
+                minLines: 3,
+                onChanged: (_) => params.requestRebuild(),
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
+    ).then((_) => params.requestRebuild());
   }
 
   Widget _buildStockLimitCard(BuildContext context, Color primary) {

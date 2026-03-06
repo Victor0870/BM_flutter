@@ -44,6 +44,7 @@ class FeedbackListScreen extends StatelessWidget {
                   .map((d) => FeedbackModel.fromFirestore(
                       d.data() as Map<String, dynamic>, d.id))
                   .toList();
+              list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
               if (list.isEmpty) {
                 return _EmptyState(onAdd: () => _openAddFeedback(context));
               }
@@ -214,7 +215,7 @@ class _FeedbackListTile extends StatelessWidget {
   }
 }
 
-/// Trang thêm góp ý (có kiểm tra rate limit).
+/// Trang thêm góp ý — giới hạn 10 góp ý/ngày (SharedPreferences, tránh spam).
 class _AddFeedbackPage extends StatefulWidget {
   const _AddFeedbackPage();
 
@@ -226,21 +227,6 @@ class _AddFeedbackPageState extends State<_AddFeedbackPage> {
   final _controller = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
-  String? _rateLimitError;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkRateLimit();
-  }
-
-  Future<void> _checkRateLimit() async {
-    final auth = context.read<AuthProvider>();
-    final userId = auth.user?.uid;
-    if (userId == null) return;
-    final error = await FeedbackService.canSubmitFeedback(userId);
-    if (mounted) setState(() => _rateLimitError = error);
-  }
 
   @override
   void dispose() {
@@ -249,12 +235,6 @@ class _AddFeedbackPageState extends State<_AddFeedbackPage> {
   }
 
   Future<void> _submit() async {
-    if (_rateLimitError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_rateLimitError!), backgroundColor: Colors.orange),
-      );
-      return;
-    }
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AuthProvider>();
     final shopId = auth.shop?.id;
@@ -265,6 +245,13 @@ class _AddFeedbackPageState extends State<_AddFeedbackPage> {
       );
       return;
     }
+    final limitError = await FeedbackService.canSubmitFeedback(userId);
+    if (limitError != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(limitError), backgroundColor: Colors.orange),
+      );
+      return;
+    }
     setState(() => _loading = true);
     try {
       await FeedbackService.submitFeedback(
@@ -272,6 +259,7 @@ class _AddFeedbackPageState extends State<_AddFeedbackPage> {
         userId: userId,
         content: _controller.text.trim(),
       );
+      await FeedbackService.recordFeedbackSubmitted(userId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Đã gửi góp ý.'), backgroundColor: Colors.green),
@@ -298,26 +286,6 @@ class _AddFeedbackPageState extends State<_AddFeedbackPage> {
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            if (_rateLimitError != null)
-              Card(
-                color: Colors.orange.shade50,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline, color: Colors.orange.shade700),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _rateLimitError!,
-                          style: TextStyle(color: Colors.orange.shade900),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            if (_rateLimitError != null) const SizedBox(height: 16),
             TextFormField(
               controller: _controller,
               maxLines: 5,
@@ -334,7 +302,7 @@ class _AddFeedbackPageState extends State<_AddFeedbackPage> {
             ),
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: _loading || _rateLimitError != null ? null : _submit,
+              onPressed: _loading ? null : _submit,
               child: _loading
                   ? const SizedBox(
                       height: 24,

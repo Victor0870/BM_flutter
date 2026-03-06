@@ -332,6 +332,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
             .map((d) => FeedbackModel.fromFirestore(
                 d.data() as Map<String, dynamic>, d.id))
             .toList();
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
         if (list.isEmpty) {
           return const Center(
             child: Text('Chưa có góp ý nào.'),

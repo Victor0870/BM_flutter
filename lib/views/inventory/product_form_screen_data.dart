@@ -16,6 +16,7 @@ class ProductFormParams {
     required this.barcodeController,
     required this.categoryController,
     required this.manufacturerController,
+    required this.descriptionController,
     required this.skuController,
     required this.imageUrlController,
     required this.minStockController,
@@ -56,6 +57,7 @@ class ProductFormParams {
   final TextEditingController barcodeController;
   final TextEditingController categoryController;
   final TextEditingController manufacturerController;
+  final TextEditingController descriptionController;
   final TextEditingController skuController;
   final TextEditingController imageUrlController;
   final TextEditingController minStockController;

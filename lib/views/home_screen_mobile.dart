@@ -444,13 +444,6 @@ class HomeScreenMobile extends StatelessWidget {
         isPrimary: true,
       ),
       _QuickActionButton(
-        key: keyQuickActionStock,
-        icon: Icons.warehouse,
-        label: 'Quản lý kho',
-        color: const Color(0xFF0EA5E9),
-        onTap: () => Navigator.pushNamed(context, AppRoutes.stockOverview),
-      ),
-      _QuickActionButton(
         key: keyQuickActionProducts,
         icon: Icons.inventory_2,
         label: 'Sản phẩm',
@@ -476,6 +469,12 @@ class HomeScreenMobile extends StatelessWidget {
         color: Colors.blue,
         onTap: () => Navigator.pushNamed(context, AppRoutes.customerManagement),
       ),
+      _QuickActionButton(
+        icon: Icons.business_center,
+        label: 'Nhà cung cấp',
+        color: const Color(0xFF0D9488),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.suppliers),
+      ),
       if (authProvider.hasPermission(EmployeePermissions.manageEmployees))
         _QuickActionButton(
           icon: Icons.badge_rounded,
@@ -498,15 +497,7 @@ class HomeScreenMobile extends StatelessWidget {
         icon: Icons.bar_chart,
         label: 'Báo cáo',
         color: Colors.purple,
-        onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Tính năng đang phát triển'),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 2),
-            ),
-          );
-        },
+        onTap: () => Navigator.pushNamed(context, AppRoutes.reports),
       ),
       _QuickActionButton(
         icon: Icons.feedback_outlined,

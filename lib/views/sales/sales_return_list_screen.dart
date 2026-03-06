@@ -194,7 +194,7 @@ class _SalesReturnListScreenState extends State<SalesReturnListScreen> {
                 children: [
                   _filterSection(context, 'Chi nhánh', [
                     DropdownButtonFormField<String?>(
-                      value: _filterBranchId,
+                      initialValue: _filterBranchId,
                       decoration: const InputDecoration(
                         hintText: 'Chọn chi nhánh',
                         isDense: true,

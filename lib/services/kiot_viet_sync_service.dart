@@ -172,48 +172,6 @@ class KiotVietSyncService {
       for (final row in rows) {
         final cells = row['cells'] is Map ? Map<String, dynamic>.from(row['cells'] as Map) : <String, dynamic>{};
         final idx = row['index'] is int ? row['index'] as int : toInsert.length;
-  Future<void> _downloadAndSave(String shopId, String lastUpdateIso8601) async {
-    await _local.clearKiotVietData(shopId);
-
-    const batchSize = 500;
-    DocumentSnapshot? lastDoc;
-    int total = 0;
-
-    while (true) {
-      final page = await _firebase.getKiotVietDataRows(
-        shopId,
-        '0',
-        limit: batchSize,
-        startAfterDoc: lastDoc,
-      );
-      if (page.rows.isEmpty) break;
-
-      final toInsert = <Map<String, dynamic>>[];
-      for (final row in page.rows) {
-        final cells = row['cells'] as Map<String, dynamic>? ?? {};
-        final tenXe = _cell(cells, 'Tên Xe');
-        final doiXe = _cell(cells, 'Đời Xe');
-        final chungLoai = _cell(cells, 'Chủng loại');
-        final tenPhuTung = _cell(cells, 'Tên Phụ Tùng');
-        toInsert.add({
-          'row_index': row['index'] as int? ?? 0,
-          'ten_xe': tenXe,
-          'doi_xe': doiXe,
-          'chung_loai': chungLoai,
-          'ten_phu_tung': tenPhuTung,
-          'cells': jsonEncode(cells),
-        });
-      }
-      await _local.insertKiotVietRows(shopId, toInsert);
-      total += toInsert.length;
-      if (page.rows.length < batchSize) break;
-      lastDoc = page.lastDoc;
-    }
-
-    await _local.setKiotVietLastUpdate(shopId, lastUpdateIso8601);
-    if (kDebugMode) debugPrint('KiotVietSync: đã lưu $total dòng local');
-  }
-
         final tenXe = _cell(cells, 'Tên Xe');
         final doiXe = _cell(cells, 'Đời Xe');
         final chungLoai = _cell(cells, 'Chủng loại');

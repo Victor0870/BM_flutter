@@ -167,7 +167,7 @@ class _FeedbackDetailScreenState extends State<FeedbackDetailScreen> {
                       if (f.respondedAt != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          '${DateFormat('dd/MM/yyyy HH:mm').format(f.respondedAt!)}',
+                          DateFormat('dd/MM/yyyy HH:mm').format(f.respondedAt!),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),

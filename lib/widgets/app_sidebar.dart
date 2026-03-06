@@ -689,6 +689,7 @@ setState(() {
     final subItems = [
       (l10n.stockOverview, AppRoutes.stockOverview),
       (l10n.purchase, AppRoutes.purchase),
+      (l10n.suppliers, AppRoutes.suppliers),
       if (showTransferStock) (l10n.transferStock, AppRoutes.transferStock),
       (l10n.adjustStock, AppRoutes.adjustStock),
     ];

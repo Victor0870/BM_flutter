@@ -180,6 +180,7 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
   @override
   Widget build(BuildContext context) {
     final double maxWidth = isDesktopPlatform ? 1200 : 800;
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
 
     return Scaffold(
       appBar: isDesktopPlatform
@@ -196,20 +197,23 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Báo cáo tổng hợp hàng trả',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0F172A),
-                      ),
+                // Tiêu đề + nút: mobile xếp dọc, desktop hàng ngang
+                if (isNarrow) ...[
+                  Text(
+                    'Báo cáo tổng hợp hàng trả',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
                     ),
-                    Row(
-                      children: [
-                        ElevatedButton.icon(
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
                           onPressed: _loadReport,
                           icon: const Icon(Icons.refresh, size: 18),
                           label: const Text('Tải lại'),
@@ -218,23 +222,57 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
                             foregroundColor: Colors.white,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
                           onPressed: _exportToExcel,
                           icon: const Icon(Icons.file_download, size: 18),
                           label: const Text('Xuất Excel'),
                         ),
-                      ],
-                    ),
-                  ],
-                ),
+                      ),
+                    ],
+                  ),
+                ] else
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Báo cáo tổng hợp hàng trả',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: _loadReport,
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Tải lại'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade600,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: _exportToExcel,
+                            icon: const Icon(Icons.file_download, size: 18),
+                            label: const Text('Xuất Excel'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 16),
-                // Filters
-                Row(
-                  children: [
-                    // Bộ lọc thời gian
-                    Expanded(
-                      child: DateRangeFilter(
+                // Filters: mobile xếp dọc
+                if (isNarrow)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      DateRangeFilter(
                         startDate: _startDate,
                         endDate: _endDate,
                         onStartDateChanged: (date) {
@@ -250,28 +288,23 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
                           _loadReport();
                         },
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    // Bộ lọc chi nhánh
-                    Consumer<BranchProvider>(
-                      builder: (context, branchProvider, child) {
-                        final branches = branchProvider.branches.where((b) => b.isActive).toList();
-                        final items = <DropdownMenuItem<String?>>[
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('Tất cả chi nhánh'),
-                          ),
-                          ...branches.map(
-                            (b) => DropdownMenuItem<String?>(
-                              value: b.id,
-                              child: Text(b.name),
+                      const SizedBox(height: 12),
+                      Consumer<BranchProvider>(
+                        builder: (context, branchProvider, child) {
+                          final branches = branchProvider.branches.where((b) => b.isActive).toList();
+                          final items = <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('Tất cả chi nhánh'),
                             ),
-                          ),
-                        ];
-
-                        return SizedBox(
-                          width: 200,
-                          child: Container(
+                            ...branches.map(
+                              (b) => DropdownMenuItem<String?>(
+                                value: b.id,
+                                child: Text(b.name, overflow: TextOverflow.ellipsis),
+                              ),
+                            ),
+                          ];
+                          return Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
                             decoration: BoxDecoration(
                               color: Colors.white,
@@ -290,14 +323,77 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
                                 _loadReport();
                               },
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
+                          );
+                        },
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DateRangeFilter(
+                          startDate: _startDate,
+                          endDate: _endDate,
+                          onStartDateChanged: (date) {
+                            setState(() {
+                              _startDate = date;
+                            });
+                            _loadReport();
+                          },
+                          onEndDateChanged: (date) {
+                            setState(() {
+                              _endDate = date;
+                            });
+                            _loadReport();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Consumer<BranchProvider>(
+                        builder: (context, branchProvider, child) {
+                          final branches = branchProvider.branches.where((b) => b.isActive).toList();
+                          final items = <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('Tất cả chi nhánh'),
+                            ),
+                            ...branches.map(
+                              (b) => DropdownMenuItem<String?>(
+                                value: b.id,
+                                child: Text(b.name),
+                              ),
+                            ),
+                          ];
+                          return SizedBox(
+                            width: 200,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: DropdownButton<String?>(
+                                value: _selectedBranchId,
+                                isExpanded: true,
+                                underline: const SizedBox(),
+                                items: items,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedBranchId = value;
+                                  });
+                                  _loadReport();
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 16),
-                // Summary Cards
+                // Summary Cards: mobile xếp dọc
                 Consumer<SalesReturnProvider>(
                   builder: (context, provider, child) {
                     return _SummaryCards(
@@ -305,6 +401,7 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
                       totalRefundAmount: provider.totalRefundAmount,
                       returnRatePercentage: _returnRatePercentage ?? 0.0,
                       totalSalesCount: _totalSalesCount,
+                      isNarrow: isNarrow,
                     );
                   },
                 ),
@@ -381,25 +478,51 @@ class _SalesReturnReportScreenState extends State<SalesReturnReportScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 16),
-                                  SizedBox(
-                                    height: 300,
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          flex: 2,
-                                          child: _ReasonPieChart(
-                                            reasonStatistics: provider.reasonStatistics,
-                                          ),
+                                  LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final isNarrowChart = constraints.maxWidth < 400;
+                                      if (isNarrowChart) {
+                                        return Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              height: 220,
+                                              child: _ReasonPieChart(
+                                                reasonStatistics: provider.reasonStatistics,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 16),
+                                            SizedBox(
+                                              height: 120,
+                                              child: _ReasonLegend(
+                                                reasonStatistics: provider.reasonStatistics,
+                                                totalCount: provider.totalReturnCount,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }
+                                      return SizedBox(
+                                        height: 300,
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              flex: 2,
+                                              child: _ReasonPieChart(
+                                                reasonStatistics: provider.reasonStatistics,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              flex: 1,
+                                              child: _ReasonLegend(
+                                                reasonStatistics: provider.reasonStatistics,
+                                                totalCount: provider.totalReturnCount,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        Expanded(
-                                          flex: 1,
-                                          child: _ReasonLegend(
-                                            reasonStatistics: provider.reasonStatistics,
-                                            totalCount: provider.totalReturnCount,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
@@ -451,54 +574,65 @@ class _SummaryCards extends StatelessWidget {
   final double totalRefundAmount;
   final double returnRatePercentage;
   final int totalSalesCount;
+  final bool isNarrow;
 
   const _SummaryCards({
     required this.totalReturnCount,
     required this.totalRefundAmount,
     required this.returnRatePercentage,
     required this.totalSalesCount,
+    this.isNarrow = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final cards = [
+      _StatCard(
+        icon: Icons.receipt_long,
+        iconColor: const Color(0xFFDC2626),
+        iconBg: const Color(0xFFFFF1F2),
+        label: 'Tổng số đơn trả',
+        value: totalReturnCount.toString(),
+        suffix: 'đơn',
+      ),
+      _StatCard(
+        icon: Icons.attach_money,
+        iconColor: const Color(0xFFDC2626),
+        iconBg: const Color(0xFFFFF1F2),
+        label: 'Tổng giá trị hoàn',
+        value: NumberFormat.compactCurrency(
+          locale: 'vi_VN',
+          symbol: '₫',
+        ).format(totalRefundAmount),
+        suffix: '',
+      ),
+      _StatCard(
+        icon: Icons.trending_down,
+        iconColor: const Color(0xFFF59E0B),
+        iconBg: const Color(0xFFFFFBEB),
+        label: 'Tỷ lệ đơn trả',
+        value: returnRatePercentage.toStringAsFixed(2),
+        suffix: '%',
+        subtitle: '$totalReturnCount / $totalSalesCount đơn',
+      ),
+    ];
+    if (isNarrow) {
+      return Column(
+        children: [
+          for (int i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            cards[i],
+          ],
+        ],
+      );
+    }
     return Row(
       children: [
-        Expanded(
-          child: _StatCard(
-            icon: Icons.receipt_long,
-            iconColor: const Color(0xFFDC2626),
-            iconBg: const Color(0xFFFFF1F2),
-            label: 'Tổng số đơn trả',
-            value: totalReturnCount.toString(),
-            suffix: 'đơn',
-          ),
-        ),
+        Expanded(child: cards[0]),
         const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.attach_money,
-            iconColor: const Color(0xFFDC2626),
-            iconBg: const Color(0xFFFFF1F2),
-            label: 'Tổng giá trị hoàn',
-            value: NumberFormat.compactCurrency(
-              locale: 'vi_VN',
-              symbol: '₫',
-            ).format(totalRefundAmount),
-            suffix: '',
-          ),
-        ),
+        Expanded(child: cards[1]),
         const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: Icons.trending_down,
-            iconColor: const Color(0xFFF59E0B),
-            iconBg: const Color(0xFFFFFBEB),
-            label: 'Tỷ lệ đơn trả',
-            value: returnRatePercentage.toStringAsFixed(2),
-            suffix: '%',
-            subtitle: '$totalReturnCount / $totalSalesCount đơn',
-          ),
-        ),
+        Expanded(child: cards[2]),
       ],
     );
   }
@@ -546,6 +680,7 @@ class _StatCard extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
@@ -556,6 +691,8 @@ class _StatCard extends StatelessWidget {
                     color: Colors.grey.shade500,
                     letterSpacing: 0.5,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Row(
@@ -564,21 +701,25 @@ class _StatCard extends StatelessWidget {
                       child: Text(
                         value,
                         style: const TextStyle(
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFF0F172A),
                         ),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      suffix,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade500,
+                    if (suffix.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        suffix,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
+                    ],
                   ],
                 ),
                 if (subtitle != null) ...[
@@ -589,6 +730,8 @@ class _StatCard extends StatelessWidget {
                       fontSize: 10,
                       color: Colors.grey.shade400,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ],

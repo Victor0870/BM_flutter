@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../models/shop_model.dart';
+import '../../widgets/change_password_dialog.dart';
 
 /// Màn hình mobile: Tài khoản & Gói dịch vụ.
 /// Hiển thị thông tin shop, gói đang dùng và danh sách gói để nâng cấp/gia hạn.
@@ -50,6 +51,8 @@ class AccountPackageScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildShopInfo(context, shop, branchCount, accountEmail),
+                const SizedBox(height: 12),
+                _buildChangePasswordTile(context),
                 const SizedBox(height: 20),
                 _buildActivePackageCard(
                   context,
@@ -62,6 +65,33 @@ class AccountPackageScreen extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildChangePasswordTile(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () => showChangePasswordDialog(context),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: Row(
+            children: [
+              Icon(Icons.lock_reset, size: 22, color: theme.colorScheme.primary),
+              const SizedBox(width: 12),
+              Text(
+                'Đổi mật khẩu',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w500),
+              ),
+              const Spacer(),
+              Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
+        ),
       ),
     );
   }

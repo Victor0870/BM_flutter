@@ -24,6 +24,7 @@ import '../views/sales/sales_history_screen.dart';
 import '../views/sales/sales_screen.dart';
 import '../views/sales/sales_return_list_screen.dart';
 import '../views/sales/einvoice_management_screen.dart';
+import '../views/reports/reports_hub_screen.dart';
 import '../views/reports/sales_return_report_screen.dart';
 import '../views/reports/revenue_report_screen.dart';
 import '../views/reports/profit_report_screen.dart';
@@ -39,6 +40,9 @@ import '../views/kiotviet/kiot_viet_lookup_screen.dart';
 import '../views/kiotviet/kiot_viet_data_goc_screen.dart';
 import '../views/feedback/feedback_list_screen.dart';
 import '../views/feedback/feedback_detail_screen.dart';
+import '../views/suppliers/supplier_list_screen.dart';
+import '../views/suppliers/supplier_form_screen.dart';
+import '../models/supplier_model.dart';
 import '../views/employees/employee_management_screen.dart';
 import '../views/employees/employee_group_management_screen.dart';
 import '../widgets/app_sidebar.dart';
@@ -95,6 +99,8 @@ class AppRoutes {
   static const String kiotVietDataGoc = '/kiotviet-data-goc';
   static const String feedback = '/feedback';
   static const String feedbackDetail = '/feedback-detail';
+  static const String suppliers = '/suppliers';
+  static const String supplierForm = '/supplier-form';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     final bool isDesktop =
@@ -144,9 +150,8 @@ class AppRoutes {
         case saleDetail:
           final sale = settings.arguments as SaleModel;
           return SaleDetailScreen(sale: sale);
-        // Các route placeholder hiển thị màn hình \"Tính năng đang phát triển\"
         case reports:
-          return const FeatureComingSoonScreen(title: 'Báo cáo tổng quan');
+          return const ReportsHubScreen();
         case returnInvoice:
           return const SalesReturnListScreen();
         case cancelInvoice:
@@ -202,6 +207,11 @@ class AppRoutes {
         case feedbackDetail:
           final id = settings.arguments as String?;
           return FeedbackDetailScreen(feedbackId: id ?? '');
+        case suppliers:
+          return const SupplierListScreen();
+        case supplierForm:
+          final supplier = settings.arguments as SupplierModel?;
+          return SupplierFormScreen(supplier: supplier);
         default:
           return const Scaffold(
             body: Center(

@@ -1,63 +1,69 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/feedback_model.dart';
 import 'notification_service.dart';
 
-/// Service góp ý: tạo góp ý, kiểm tra rate limit, admin phản hồi.
-/// Collection root: `feedback`.
+/// Service góp ý: collection đơn giản — mỗi document: userId, content, isResponded, response.
+/// Giới hạn 10 góp ý/ngày theo SharedPreferences (tránh spam, không cần query Firestore).
 class FeedbackService {
   FeedbackService._();
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _logTag = '[FeedbackService]';
 
-  /// Khoảng thời gian tối thiểu giữa 2 lần gửi (phút).
-  static const int minMinutesBetweenSubmissions = 30;
-  /// Số góp ý tối đa mỗi tài khoản mỗi ngày.
-  static const int maxPerDayPerUser = 10;
+  static const int maxFeedbackPerDay = 10;
+  static const String _keyDatePrefix = 'feedback_limit_date_';
+  static const String _keyCountPrefix = 'feedback_limit_count_';
 
-  /// Kiểm tra có thể gửi góp ý không (rate limit).
-  /// Trả về null nếu được phép; chuỗi lỗi nếu bị chặn.
+  /// Kiểm tra có được gửi thêm góp ý không (tối đa 10/ngày, lưu trong SharedPreferences).
+  /// Trả về null nếu được phép; chuỗi lỗi nếu đã đạt giới hạn.
   static Future<String?> canSubmitFeedback(String userId) async {
     if (userId.isEmpty) return 'Vui lòng đăng nhập.';
     try {
-      final now = DateTime.now();
-      final startOfToday = DateTime(now.year, now.month, now.day);
-      final minTime = now.subtract(const Duration(minutes: minMinutesBetweenSubmissions));
-
-      final recentSnap = await _firestore
-          .collection('feedback')
-          .where('userId', isEqualTo: userId)
-          .orderBy('createdAt', descending: true)
-          .limit(maxPerDayPerUser + 1)
-          .get();
-
-      if (recentSnap.docs.isEmpty) return null;
-
-      final docs = recentSnap.docs;
-      final last = docs.first;
-      final lastData = last.data();
-      final lastCreated = (lastData['createdAt'] as Timestamp?)?.toDate();
-      if (lastCreated != null && lastCreated.isAfter(minTime)) {
-        final waitMin = minMinutesBetweenSubmissions - (now.difference(lastCreated).inMinutes);
-        return 'Vui lòng chờ $waitMin phút nữa trước khi gửi góp ý tiếp.';
-      }
-
-      int countToday = 0;
-      for (final d in docs) {
-        final createdAt = (d.data()['createdAt'] as Timestamp?)?.toDate();
-        if (createdAt != null && !createdAt.isBefore(startOfToday)) countToday++;
-      }
-      if (countToday >= maxPerDayPerUser) {
-        return 'Bạn đã gửi tối đa $maxPerDayPerUser góp ý trong ngày. Vui lòng thử lại vào ngày mai.';
+      final prefs = await SharedPreferences.getInstance();
+      final today = _todayString();
+      final dateKey = _keyDatePrefix + userId;
+      final countKey = _keyCountPrefix + userId;
+      final savedDate = prefs.getString(dateKey);
+      final count = prefs.getInt(countKey) ?? 0;
+      if (savedDate != today) return null; // ngày mới hoặc chưa gửi lần nào
+      if (count >= maxFeedbackPerDay) {
+        return 'Bạn đã gửi tối đa $maxFeedbackPerDay góp ý trong ngày. Vui lòng thử lại vào ngày mai.';
       }
       return null;
     } catch (e) {
       if (kDebugMode) debugPrint('$_logTag canSubmitFeedback error: $e');
-      return 'Không thể kiểm tra. Vui lòng thử lại.';
+      return null; // lỗi đọc prefs thì vẫn cho gửi
     }
   }
 
-  /// Gửi góp ý mới. Gọi sau khi [canSubmitFeedback] trả về null.
+  /// Ghi nhận đã gửi 1 góp ý (gọi sau khi gửi Firestore thành công).
+  static Future<void> recordFeedbackSubmitted(String userId) async {
+    if (userId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = _todayString();
+      final dateKey = _keyDatePrefix + userId;
+      final countKey = _keyCountPrefix + userId;
+      final savedDate = prefs.getString(dateKey);
+      final count = prefs.getInt(countKey) ?? 0;
+      if (savedDate != today) {
+        await prefs.setString(dateKey, today);
+        await prefs.setInt(countKey, 1);
+      } else {
+        await prefs.setInt(countKey, count + 1);
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('$_logTag recordFeedbackSubmitted error: $e');
+    }
+  }
+
+  static String _todayString() {
+    final n = DateTime.now();
+    return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Gửi góp ý mới (chỉ cần shopId, userId, content).
   static Future<FeedbackModel?> submitFeedback({
     required String shopId,
     required String userId,
@@ -82,27 +88,26 @@ class FeedbackService {
     }
   }
 
-  /// Stream danh sách góp ý theo shop (cho user app).
+  /// Stream danh sách góp ý theo shop. Chỉ where shopId, không orderBy để không cần composite index; sort trong app.
   static Stream<QuerySnapshot> streamByShop(String shopId) {
-    if (shopId.isEmpty) {
-      return const Stream.empty();
-    }
+    if (shopId.isEmpty) return const Stream.empty();
     return _firestore
         .collection('feedback')
         .where('shopId', isEqualTo: shopId)
-        .orderBy('createdAt', descending: true)
+        .limit(200)
         .snapshots();
   }
 
-  /// Stream tất cả góp ý (cho admin). Có thể lọc isResponded.
+  /// Stream tất cả góp ý (cho admin). Không orderBy/where phức tạp; sort trong app.
   static Stream<QuerySnapshot> streamForAdmin({bool? isResponded}) {
-    Query<Map<String, dynamic>> q = _firestore
-        .collection('feedback')
-        .orderBy('createdAt', descending: true);
     if (isResponded != null) {
-      q = q.where('isResponded', isEqualTo: isResponded);
+      return _firestore
+          .collection('feedback')
+          .where('isResponded', isEqualTo: isResponded)
+          .limit(500)
+          .snapshots();
     }
-    return q.snapshots();
+    return _firestore.collection('feedback').limit(500).snapshots();
   }
 
   /// Stream số góp ý chưa phản hồi (cho badge admin).

@@ -678,21 +678,26 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       await firebaseService.saveKiotVietExcelContentToFirestore(shopId, bytes);
       if (!mounted) return;
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Đã lưu nội dung Excel lên Firebase thành công.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (!mounted) return;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã lưu nội dung Excel lên Firebase thành công.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('Error uploading KiotViet Excel file: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Lỗi tải lên: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi tải lên: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isUploadingKiotVietFile = false);
     }

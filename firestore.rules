@@ -66,6 +66,11 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // Rules cho subcollection suppliers của shop (nhà cung cấp)
+      match /suppliers/{supplierId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // Rules cho subcollection customer_groups của shop (nhóm KH, lọc, cột hiển thị)
       match /customer_groups/{groupId} {
         allow read, write: if isOwner(userId);
