@@ -8,6 +8,7 @@ import '../../controllers/branch_provider.dart';
 import '../../controllers/notification_provider.dart';
 import '../../widgets/notification_popup.dart';
 import 'home_screen_data.dart';
+import 'sales/sale_detail_screen.dart';
 
 /// Màn hình tổng quan (Dashboard) tối ưu cho màn hình rộng.
 class HomeScreenDesktop extends StatelessWidget {
@@ -851,6 +852,14 @@ class HomeScreenDesktop extends StatelessWidget {
               final branchName = getBranchName(sale.branchId);
 
               return DataRow(
+                onSelectChanged: (_) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SaleDetailScreen(sale: sale),
+                    ),
+                  );
+                },
                 cells: [
                   DataCell(
                     SizedBox(

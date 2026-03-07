@@ -47,6 +47,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _selectedCategoryId; // ID của CategoryModel
   List<ProductVariant> _variants = [];
   List<UnitConversion> _units = []; // Danh sách đơn vị quy đổi
+  List<ProductAttribute> _attributes = []; // Thuộc tính: Màu sắc, Size...
   
   // Loại hình sản phẩm
   bool _isInventoryManaged = true;
@@ -100,6 +101,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _selectedCategoryId = product.categoryId;
     _variants = List.from(product.variants);
     _units = List.from(product.units);
+    _attributes = List.from(product.attributes);
     _isInventoryManaged = product.isInventoryManaged;
     _isImeiManaged = product.isImeiManaged;
     _isBatchManaged = product.isBatchManaged;
@@ -498,6 +500,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _maxStockController.clear();
         _selectedCategoryId = null;
         _variants.clear();
+        _attributes.clear();
         _units = [
           UnitConversion(
             id: 'default',
@@ -614,6 +617,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       maxStock: _maxStockController.text.trim().isEmpty
           ? null
           : double.tryParse(_maxStockController.text),
+      attributes: _attributes,
       variants: _variants,
       isInventoryManaged: _isInventoryManaged,
       isImeiManaged: _isImeiManaged,
@@ -842,6 +846,75 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     );
   }
 
+  /// Dialog thêm/sửa thuộc tính (Màu sắc, Size...)
+  void _showAddAttributeDialog({int? index}) {
+    final attr = index != null ? _attributes[index] : null;
+    final nameController = TextEditingController(text: attr?.attributeName ?? '');
+    final valueController = TextEditingController(text: attr?.attributeValue ?? '');
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(attr == null ? 'Thêm thuộc tính' : 'Sửa thuộc tính'),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Tên thuộc tính *',
+                    hintText: 'VD: Màu sắc, Size, Chất liệu...',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Vui lòng nhập tên thuộc tính' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: valueController,
+                  decoration: const InputDecoration(
+                    labelText: 'Giá trị *',
+                    hintText: 'VD: Đỏ, M, Cotton...',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Vui lòng nhập giá trị' : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Hủy'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                final newAttr = ProductAttribute(
+                  attributeName: nameController.text.trim(),
+                  attributeValue: valueController.text.trim(),
+                );
+                setState(() {
+                  if (index != null) {
+                    _attributes[index] = newAttr;
+                  } else {
+                    _attributes.add(newAttr);
+                  }
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: Text(attr == null ? 'Thêm' : 'Cập nhật'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.product != null;
@@ -909,6 +982,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             onCategoryChanged: (value) => setState(() => _selectedCategoryId = value),
             showAddVariantDialog: _showAddVariantDialog,
             showAddUnitDialog: _showAddUnitDialog,
+            showAddAttributeDialog: _showAddAttributeDialog,
             showQuickAddCategoryDialog: () => _showQuickAddCategoryDialog(productProvider),
             onToggleInventoryManaged: (value) => setState(() => _isInventoryManaged = value),
             onToggleImeiManaged: (value) => setState(() => _isImeiManaged = value),
@@ -920,6 +994,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               });
             },
             onRemoveUnit: (index) => setState(() => _units.removeAt(index)),
+            attributes: _attributes,
+            onRemoveAttribute: (index) => setState(() => _attributes.removeAt(index)),
             requestRebuild: () => setState(() {}),
             onShowStockCard: (isEdit && widget.product != null) ? () => _showStockCardSheet(context) : null,
           );

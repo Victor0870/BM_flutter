@@ -4,10 +4,12 @@ import '../models/shop_model.dart';
 /// Service chuẩn bị dữ liệu cho hóa đơn điện tử (FPT và Viettel).
 /// FPT dùng format 01/MTT (inv, items, sum, vat, total...). Viettel dùng generalInvoiceInfo, sellerInfo, buyerInfo, itemInfo, summarizeInfo, taxBreakdowns.
 class EinvoiceDataService {
-  /// Chuẩn bị payload JSON theo đặc tả FPT (01/MTT) từ SaleModel và ShopModel
+  /// Chuẩn bị payload JSON theo đặc tả FPT (01/MTT) từ SaleModel và ShopModel.
+  /// [isDraft]: true = không gửi aun → FPT tạo hóa đơn nháp (Chờ phát hành), có thể xóa bằng API delete-icr.
   static Map<String, dynamic> prepareFptPayload({
     required SaleModel sale,
     required ShopModel shop,
+    bool isDraft = false,
   }) {
     // Tính toán tổng tiền và thuế
     double sum = 0.0; // Tổng tiền chưa thuế
@@ -40,23 +42,24 @@ class EinvoiceDataService {
 
       return {
         'name': item.productName,
-        'unit': 'cái', // Đơn vị mặc định, có thể lấy từ ProductModel nếu cần
-        'price': item.price.toStringAsFixed(2),
-        'quantity': item.quantity.toStringAsFixed(2),
+        'unit': 'cái',
+        'price': double.parse(item.price.toStringAsFixed(2)),
+        'quantity': double.parse(item.quantity.toStringAsFixed(2)),
         'vrt': vrt.toString(),
-        'amount': amount.toStringAsFixed(2),
-        'vat': itemVat.toStringAsFixed(2), // Bắt buộc 01/MTT: Số tiền thuế từng hàng hóa
-        'total': (amount + itemVat).toStringAsFixed(2), // Bắt buộc 01/MTT: Tổng tiền đã bao gồm thuế
+        'amount': double.parse(amount.toStringAsFixed(2)),
+        'vat': double.parse(itemVat.toStringAsFixed(2)),
+        'total': double.parse((amount + itemVat).toStringAsFixed(2)),
       };
     }).toList();
 
-    // Format ngày hóa đơn: yyyy-mm-dd hh:mm:ss
-    final formattedDate = '${sale.timestamp.year.toString().padLeft(4, '0')}-'
-        '${sale.timestamp.month.toString().padLeft(2, '0')}-'
-        '${sale.timestamp.day.toString().padLeft(2, '0')} '
-        '${sale.timestamp.hour.toString().padLeft(2, '0')}:'
-        '${sale.timestamp.minute.toString().padLeft(2, '0')}:'
-        '${sale.timestamp.second.toString().padLeft(2, '0')}';
+    // Ngày hóa đơn (idt): FPT yêu cầu phải lớn hơn ngày gần nhất sử dụng dải số → dùng thời điểm hiện tại khi gửi API
+    final now = DateTime.now();
+    final formattedDate = '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}';
 
     // Map payment method
     String paym = 'TM';
@@ -75,42 +78,37 @@ class EinvoiceDataService {
     // total = sum - tradeamount - discount + vat (theo công thức FPT)
     final total = sum - tradeamount - discount + vat;
 
-    // Cấu trúc payload theo đặc tả FPT
-    final invMap = {
+    // Cấu trúc payload theo đặc tả FPT (mục 4.1: items và thanh toán nằm trong inv)
+    final Map<String, dynamic> invMap = {
       'type': '01/MTT', // Hóa đơn GTGT từ máy tính tiền
       'form': '1', // Mẫu số cho hóa đơn GTGT
       'sid': sale.id, // Mã duy nhất cho mỗi giao dịch
       'idt': formattedDate, // Ngày hóa đơn
       'paym': paym, // Hình thức thanh toán
-      'aun': '2', // Gán cố định = 2 (Để hệ thống FPT tự động cấp số và mã CQT)
       'stax': shop.stax ?? '', // Mã số thuế người bán
       'serial': shop.serial ?? '', // Ký hiệu hóa đơn
     };
+    if (!isDraft) invMap['aun'] = 2; // FPT: aun phải là số (1, 2, hoặc 3). 2 = FPT tự động cấp số và mã CQT
 
-    // Thêm thông tin khách hàng nếu có
-    if (sale.customerName != null && sale.customerName!.isNotEmpty) {
-      invMap['bname'] = sale.customerName!; // Tên khách hàng
-    }
-    if (sale.customerAddress != null && sale.customerAddress!.isNotEmpty) {
-      invMap['baddr'] = sale.customerAddress!; // Địa chỉ khách hàng
-    }
-    if (sale.customerTaxCode != null && sale.customerTaxCode!.isNotEmpty) {
-      invMap['btax'] = sale.customerTaxCode!; // MST khách hàng
+    // Thêm thông tin khách hàng (bname, baddr bắt buộc theo FPT; btax nếu có)
+    invMap['bname'] = sale.customerName?.trim().isNotEmpty == true ? sale.customerName!.trim() : 'Khách lẻ';
+    invMap['baddr'] = sale.customerAddress?.trim().isNotEmpty == true ? sale.customerAddress!.trim() : '';
+    if (sale.customerTaxCode != null && sale.customerTaxCode!.trim().isNotEmpty) {
+      invMap['btax'] = sale.customerTaxCode!.trim();
     }
 
-    // 01/MTT bắt buộc: sumv, vatv, totalv (quy đổi VNĐ - dùng = sum, vat, total khi nguyên tệ là VNĐ)
-    return {
-      'inv': invMap,
-      'items': itemsList,
-      'sum': sum.toStringAsFixed(2),
-      'vat': vat.toStringAsFixed(2),
-      'total': total.toStringAsFixed(2),
-      'tradeamount': tradeamount.toStringAsFixed(2),
-      'discount': discount.toStringAsFixed(2),
-      'sumv': sum.toStringAsFixed(2),
-      'vatv': vat.toStringAsFixed(2),
-      'totalv': total.toStringAsFixed(2),
-    };
+    // Theo đặc tả FPT (mục 4.1): items và thông tin thanh toán nằm TRONG inv; FPT yêu cầu kiểu Number cho các trường tiền
+    invMap['items'] = itemsList;
+    invMap['sum'] = double.parse(sum.toStringAsFixed(2));
+    invMap['vat'] = double.parse(vat.toStringAsFixed(2));
+    invMap['total'] = double.parse(total.toStringAsFixed(2));
+    invMap['tradeamount'] = double.parse(tradeamount.toStringAsFixed(2));
+    invMap['discount'] = double.parse(discount.toStringAsFixed(2));
+    invMap['sumv'] = double.parse(sum.toStringAsFixed(2));
+    invMap['vatv'] = double.parse(vat.toStringAsFixed(2));
+    invMap['totalv'] = double.parse(total.toStringAsFixed(2));
+
+    return {'lang': 'vi', 'inv': invMap};
   }
 
   /// Chuẩn bị payload JSON theo đặc tả Viettel (SInvoice V2) từ SaleModel và ShopModel.

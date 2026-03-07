@@ -13,6 +13,7 @@ import '../../controllers/tutorial_provider.dart';
 import '../../l10n/app_localizations.dart';
 import '../../core/routes.dart';
 import '../../models/shop_model.dart';
+import '../../services/einvoice_service.dart';
 import '../../services/firebase_service.dart';
 import '../../services/local_db_service.dart';
 import '../../utils/platform_utils.dart';
@@ -93,6 +94,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   bool _isLoading = false;
   bool _isUploadingLogo = false;
   bool _isUploadingKiotVietFile = false;
+  bool _isEinvoiceTestLoading = false;
   bool _obscurePassword = true;
   bool _obscurePayosApiKey = true;
   bool _obscurePayosChecksumKey = true;
@@ -262,7 +264,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                 ? 'https://api-vinvoice.viettel.vn/services/einvoiceapplication/api'
                 : _selectedEinvoiceProvider == EinvoiceProvider.misa
                     ? 'https://testapi.meinvoice.vn'
-                    : 'https://api-uat.einvoice.fpt.com.vn/create-icr');
+                    : 'https://api.einvoice.fpt.com.vn/create-icr');
         
         // Load payment config
         _selectedPaymentProvider = shop.paymentConfig?.provider ?? PaymentProvider.none;
@@ -985,6 +987,94 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     );
   }
 
+  String _defaultEinvoiceBaseUrl(EinvoiceProvider p) {
+    switch (p) {
+      case EinvoiceProvider.viettel:
+        return 'https://api-vinvoice.viettel.vn/services/einvoiceapplication/api';
+      case EinvoiceProvider.misa:
+        return 'https://testapi.meinvoice.vn';
+      case EinvoiceProvider.fpt:
+        return 'https://api.einvoice.fpt.com.vn/create-icr';
+    }
+  }
+
+  Future<void> _testEinvoiceConnectionFromDialog() async {
+    if (_einvoiceUsernameController.text.trim().isEmpty ||
+        _einvoicePasswordController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nhập Username và Password để kiểm tra đăng nhập'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (_selectedEinvoiceProvider == EinvoiceProvider.misa &&
+        _einvoiceAppIdController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('MISA yêu cầu nhập App ID'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    setState(() => _isEinvoiceTestLoading = true);
+    try {
+      final authProvider = context.read<AuthProvider>();
+      final current = authProvider.shop;
+      if (current == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chưa đăng nhập'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+      final baseUrl = _einvoiceBaseUrlController.text.trim().isEmpty
+          ? _defaultEinvoiceBaseUrl(_selectedEinvoiceProvider)
+          : _einvoiceBaseUrlController.text.trim();
+      final config = EinvoiceConfig(
+        provider: _selectedEinvoiceProvider,
+        username: _einvoiceUsernameController.text.trim(),
+        password: _einvoicePasswordController.text.trim(),
+        baseUrl: baseUrl,
+        templateCode: _selectedEinvoiceProvider == EinvoiceProvider.viettel
+            ? (_einvoiceTemplateCodeController.text.trim().isEmpty
+                ? null
+                : _einvoiceTemplateCodeController.text.trim())
+            : null,
+        appId: _selectedEinvoiceProvider == EinvoiceProvider.misa
+            ? _einvoiceAppIdController.text.trim()
+            : null,
+      );
+      final shop = current.copyWith(einvoiceConfig: config);
+      await EinvoiceService().testConnection(shop);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đăng nhập thành công. Base URL đúng.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg = e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Kiểm tra thất bại: $msg. Vui lòng kiểm tra lại Username, Password và Base URL.',
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isEinvoiceTestLoading = false);
+    }
+  }
+
   void _showEinvoiceConfigDialog() {
     showDialog(
       context: context,
@@ -1020,9 +1110,11 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   'https://api-vinvoice.viettel.vn/services/einvoiceapplication/api';
                             }
                             if (value == EinvoiceProvider.fpt &&
-                                _einvoiceBaseUrlController.text.contains('viettel')) {
+                                (_einvoiceBaseUrlController.text.isEmpty ||
+                                    _einvoiceBaseUrlController.text.contains('viettel') ||
+                                    _einvoiceBaseUrlController.text.contains('api-uat'))) {
                               _einvoiceBaseUrlController.text =
-                                  'https://api-uat.einvoice.fpt.com.vn/create-icr';
+                                  'https://api.einvoice.fpt.com.vn/create-icr';
                             }
                             if (value == EinvoiceProvider.misa &&
                                 (_einvoiceBaseUrlController.text.isEmpty ||
@@ -1088,9 +1180,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _einvoiceUsernameController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Username',
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
+                        helperText: _selectedEinvoiceProvider == EinvoiceProvider.fpt
+                            ? 'FPT: thường dùng Mã số thuế (MST) hoặc tên đăng nhập do FPT cấp'
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1119,7 +1214,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         labelText: 'Base URL',
                         border: const OutlineInputBorder(),
                         helperText: _selectedEinvoiceProvider == EinvoiceProvider.fpt
-                            ? 'Test: https://api-uat.einvoice.fpt.com.vn/create-icr'
+                            ? 'Chính thức: https://api.einvoice.fpt.com.vn/create-icr'
                             : _selectedEinvoiceProvider == EinvoiceProvider.misa
                                 ? 'Test: https://testapi.meinvoice.vn | Live: https://api.meinvoice.vn'
                                 : 'Viettel: https://api-vinvoice.viettel.vn/services/einvoiceapplication/api',
@@ -1131,15 +1226,28 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
               ),
             ),
             actions: [
+              OutlinedButton.icon(
+                onPressed: _isEinvoiceTestLoading ? null : _testEinvoiceConnectionFromDialog,
+                icon: _isEinvoiceTestLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.wifi_tethering, size: 18),
+                label: Text(_isEinvoiceTestLoading ? 'Đang kiểm tra...' : 'Kiểm tra đăng nhập'),
+              ),
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: _isEinvoiceTestLoading ? null : () => Navigator.pop(context),
                 child: Text(AppLocalizations.of(context)!.cancel),
               ),
               ElevatedButton(
-                onPressed: () {
-                  setState(() {}); // Cập nhật UI chính
-                  Navigator.pop(context);
-                },
+                onPressed: _isEinvoiceTestLoading
+                    ? null
+                    : () {
+                        setState(() {}); // Cập nhật UI chính
+                        Navigator.pop(context);
+                      },
                 child: Text(AppLocalizations.of(context)!.save),
               ),
             ],

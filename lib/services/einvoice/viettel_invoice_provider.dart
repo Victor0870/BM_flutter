@@ -72,6 +72,12 @@ class ViettelInvoiceProvider extends BaseEinvoiceProvider {
       debugPrint('📡 Viettel Response Data: ${response.data}');
     }
 
+    if (response.statusCode == 401) {
+      throw Exception(
+        'Lỗi 401 - Xác thực thất bại. Kiểm tra lại Username, Password và Base URL (Cài đặt > Hóa đơn điện tử).'
+      );
+    }
+
     final responseData = response.data;
     if (responseData is! Map<String, dynamic>) {
       throw Exception('Viettel trả về dữ liệu không hợp lệ.');

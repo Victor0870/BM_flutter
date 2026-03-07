@@ -37,6 +37,7 @@ class _SaleDetailScreenState extends State<SaleDetailScreen> {
   ShopModel? _shop;
   bool _isLoadingShop = true;
   bool _isCreatingInvoice = false;
+  bool _isCreatingDraftInvoice = false;
   String? _einvoiceUrl; // Lưu link tra cứu hóa đơn điện tử
   /// Tồn kho theo productId (chỉ load khi deductStockOnEinvoiceOnly)
   Map<String, double>? _productStocks;
@@ -459,9 +460,74 @@ class _SaleDetailScreenState extends State<SaleDetailScreen> {
       });
 
       if (mounted) {
+        final msg = e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi tạo hóa đơn điện tử: $e'),
+            content: Text('Lỗi tạo hóa đơn điện tử: $msg'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Xuất hóa đơn nháp (chỉ FPT): tạo trên FPT với trạng thái Chờ phát hành, không cấp số, dùng để test.
+  Future<void> _createDraftInvoice() async {
+    if (_shop == null || !mounted) return;
+    if (_shop!.stax == null || _shop!.stax!.isEmpty || _shop!.serial == null || _shop!.serial!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vui lòng cấu hình mã số thuế và ký hiệu hóa đơn trong Cài đặt Shop'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+    if (_shop!.einvoiceConfig == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vui lòng cấu hình thông tin đăng nhập FPT trong Cài đặt Shop'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+    if (_shop!.einvoiceConfig!.provider != EinvoiceProvider.fpt) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hóa đơn nháp chỉ hỗ trợ FPT. Nhà cung cấp hiện tại: ${_shop!.einvoiceConfig!.provider.label}.'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+    setState(() => _isCreatingDraftInvoice = true);
+    try {
+      final einvoiceService = EinvoiceService();
+      final saleToUse = _editableItems != null
+          ? widget.sale.copyWith(items: _editableItems!)
+          : widget.sale;
+      await einvoiceService.createDraftInvoice(sale: saleToUse, shop: _shop!);
+      if (!mounted) return;
+      setState(() => _isCreatingDraftInvoice = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Đã tạo hóa đơn nháp (Chờ phát hành). Bạn có thể xóa trên portal FPT nếu cần.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _isCreatingDraftInvoice = false);
+      if (mounted) {
+        final msg = e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi tạo hóa đơn nháp: $msg'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 4),
           ),
@@ -1085,6 +1151,31 @@ class _SaleDetailScreenState extends State<SaleDetailScreen> {
                       ),
                     ),
                   ),
+
+                  if (_shop?.einvoiceConfig?.provider == EinvoiceProvider.fpt) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: (_isCreatingDraftInvoice || _isCreatingInvoice) ? null : _createDraftInvoice,
+                        icon: _isCreatingDraftInvoice
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.edit_note),
+                        label: Text(
+                          _isCreatingDraftInvoice ? 'Đang tạo nháp...' : 'Xuất hóa đơn nháp',
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          foregroundColor: Colors.orange[800],
+                          side: BorderSide(color: Colors.orange.shade300),
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 12),
 

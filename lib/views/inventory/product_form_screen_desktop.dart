@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../widgets/responsive_container.dart';
 import 'product_form_screen_data.dart';
 
@@ -99,6 +100,15 @@ class ProductFormScreenDesktop extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             _minMaxStockRow(context),
+            const SizedBox(height: 24),
+            _sectionTitle(Icons.palette_outlined, Colors.purple, 'Thuộc tính'),
+            const SizedBox(height: 8),
+            Text(
+              'Thêm màu sắc, size, chất liệu... (VD: Màu sắc: Đỏ, Size: M)',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 12),
+            _attributesSection(context),
             const SizedBox(height: 24),
             _sectionTitle(Icons.swap_horiz, Colors.blue, 'Đơn vị quy đổi'),
             const SizedBox(height: 8),
@@ -342,7 +352,50 @@ class ProductFormScreenDesktop extends StatelessWidget {
     );
   }
 
+  Widget _attributesSection(BuildContext context) {
+    if (params.attributes.isEmpty) {
+      return TextButton.icon(
+        onPressed: () => params.showAddAttributeDialog(),
+        icon: const Icon(Icons.add),
+        label: const Text('Thêm thuộc tính'),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ...params.attributes.asMap().entries.map((e) {
+          final i = e.key;
+          final attr = e.value;
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              title: Text(attr.attributeName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(attr.attributeValue),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(icon: const Icon(Icons.edit, size: 20), onPressed: () => params.showAddAttributeDialog(index: i), tooltip: 'Sửa'),
+                  IconButton(icon: const Icon(Icons.delete, size: 20, color: Colors.red), onPressed: () => params.onRemoveAttribute(i), tooltip: 'Xóa'),
+                ],
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () => params.showAddAttributeDialog(),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Thêm thuộc tính'),
+        ),
+      ],
+    );
+  }
+
   Widget _unitsSection(BuildContext context) {
+    final baseUnitList = params.units.where((x) => x.conversionValue == 1.0);
+    final baseUnit = baseUnitList.isEmpty
+        ? (params.unitController.text.trim().isEmpty ? 'cái' : params.unitController.text.trim())
+        : baseUnitList.first.unitName;
     if (params.units.isEmpty) {
       return TextButton.icon(
         onPressed: () => params.showAddUnitDialog(),
@@ -356,6 +409,9 @@ class ProductFormScreenDesktop extends StatelessWidget {
         ...params.units.asMap().entries.map((e) {
           final i = e.key;
           final unit = e.value;
+          final conversionText = unit.conversionValue == 1.0
+              ? 'Đơn vị cơ bản'
+              : '1 ${unit.unitName} = ${unit.conversionValue.toStringAsFixed(unit.conversionValue == unit.conversionValue.roundToDouble() ? 0 : 1)} $baseUnit';
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
@@ -363,9 +419,9 @@ class ProductFormScreenDesktop extends StatelessWidget {
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Hệ số: ${unit.conversionValue}'),
-                  Text('Giá bán: ${unit.price.toStringAsFixed(0)} đ'),
-                  if (unit.barcode != null) Text('Mã vạch: ${unit.barcode}'),
+                  Text(conversionText),
+                  Text('Giá bán: ${NumberFormat('#,###').format(unit.price.toInt())} đ/${unit.unitName}'),
+                  if (unit.barcode != null && unit.barcode!.isNotEmpty) Text('Mã vạch: ${unit.barcode}'),
                 ],
               ),
               trailing: Row(

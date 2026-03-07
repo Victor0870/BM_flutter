@@ -46,6 +46,8 @@ class ProductFormScreenMobile extends StatelessWidget {
                   const SizedBox(height: 12),
                   _buildDescriptionCard(context, primary),
                   const SizedBox(height: 12),
+                  _buildAttributesCard(context, primary),
+                  const SizedBox(height: 12),
                   _buildStockLimitCard(context, primary),
                   const SizedBox(height: 12),
                   _buildPriceListCard(context, primary),
@@ -639,6 +641,131 @@ class ProductFormScreenMobile extends StatelessWidget {
     ).then((_) => params.requestRebuild());
   }
 
+  Widget _buildAttributesCard(BuildContext context, Color primary) {
+    return _card(
+      sectionTitle: 'THUỘC TÍNH',
+      primary: primary,
+      onEdit: () => _showAttributesSheet(context),
+      child: params.attributes.isEmpty
+          ? Row(
+              children: [
+                Icon(Icons.palette_outlined, size: 20, color: Colors.grey.shade600),
+                const SizedBox(width: 8),
+                Text(
+                  'Thêm màu sắc, size...',
+                  style: TextStyle(fontSize: 14, color: primary, fontWeight: FontWeight.w500),
+                ),
+                const Spacer(),
+                Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ...params.attributes.map((a) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Text('${a.attributeName}: ', style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
+                          Text(a.attributeValue, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    )),
+              ],
+            ),
+    );
+  }
+
+  void _showAttributesSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + MediaQuery.of(context).viewPadding.bottom),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(color: _blueLight, borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.palette_outlined, size: 24, color: _bluePrimary),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Thuộc tính sản phẩm',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _bluePrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Xong'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Thêm màu sắc, size, chất liệu...',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            if (params.attributes.isEmpty)
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  params.showAddAttributeDialog();
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Thêm thuộc tính'),
+              )
+            else
+              ...params.attributes.asMap().entries.map((e) {
+                final i = e.key;
+                final a = e.value;
+                return ListTile(
+                  title: Text(a.attributeName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(a.attributeValue),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, size: 20),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          params.showAddAttributeDialog(index: i);
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+                        onPressed: () => params.onRemoveAttribute(i),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    ).then((_) => params.requestRebuild());
+  }
+
   Widget _buildPriceListCard(BuildContext context, Color primary) {
     final price = _fmtNum(params.priceController.text);
     final unitName = params.unitController.text.trim().isEmpty ? 'cái' : params.unitController.text;
@@ -726,9 +853,16 @@ class ProductFormScreenMobile extends StatelessWidget {
               ...params.units.asMap().entries.map((e) {
                 final i = e.key;
                 final u = e.value;
+                final baseUnitList = params.units.where((x) => x.conversionValue == 1.0);
+                final baseUnit = baseUnitList.isEmpty
+                    ? (params.unitController.text.trim().isEmpty ? 'cái' : params.unitController.text.trim())
+                    : baseUnitList.first.unitName;
+                final conversionText = u.conversionValue == 1.0
+                    ? 'Đơn vị cơ bản'
+                    : '1 ${u.unitName} = ${u.conversionValue.toStringAsFixed(u.conversionValue == u.conversionValue.roundToDouble() ? 0 : 1)} $baseUnit';
                 return ListTile(
                   title: Text(u.unitName),
-                  subtitle: Text('${u.conversionValue} · ${NumberFormat('#,###').format(u.price.toInt())} đ'),
+                  subtitle: Text('$conversionText · ${NumberFormat('#,###').format(u.price.toInt())} đ/${u.unitName}'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

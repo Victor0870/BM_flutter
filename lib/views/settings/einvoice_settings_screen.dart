@@ -66,7 +66,7 @@ class _EinvoiceSettingsScreenState extends State<EinvoiceSettingsScreen> {
       case EinvoiceProvider.misa:
         return 'https://testapi.meinvoice.vn';
       case EinvoiceProvider.fpt:
-        return 'https://api-uat.einvoice.fpt.com.vn/create-icr';
+        return 'https://api.einvoice.fpt.com.vn/create-icr';
     }
   }
 

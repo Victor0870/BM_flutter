@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/product_model.dart';
 import '../models/sale_model.dart';
+import '../models/unit_conversion.dart';
 import '../models/customer_model.dart';
 import '../models/profit_report_model.dart';
 import '../services/sales_service.dart';
@@ -292,11 +293,13 @@ class SalesProvider with ChangeNotifier {
 
   /// Thêm sản phẩm vào giỏ hàng.
   /// [customer] Nếu có, dùng Bảng giá (groupPrices) theo nhóm khách (VIP/Sỉ) để lấy giá bán.
+  /// [unitId] Đơn vị bán (nếu sản phẩm có nhiều đơn vị). Giá và trừ kho theo đơn vị này.
   /// [batchName], [expireDate] Lô & Hạn sử dụng (KiotViet 2.12.1) — bắt buộc khi sản phẩm isBatchExpireControl.
   void addToCart(ProductModel product, {
     double quantity = 1,
     int? tabId,
     CustomerModel? customer,
+    String? unitId,
     String? batchName,
     DateTime? expireDate,
   }) {
@@ -306,19 +309,48 @@ class SalesProvider with ChangeNotifier {
     final shop = authProvider.shop;
     final allowNegativeStock = shop?.allowNegativeStock ?? false;
     final cart = _tabsCart[id]!;
-    final unitPrice = customer != null ? product.getPriceForGroups(customer.groups) : product.price;
 
-    // Key giỏ: sản phẩm theo lô dùng key composite để mỗi lô một dòng
+    UnitConversion? selectedUnit;
+    if (unitId != null && product.units.isNotEmpty) {
+      try {
+        selectedUnit = product.units.firstWhere((u) => u.id == unitId);
+      } catch (_) {
+        selectedUnit = product.units.isNotEmpty ? product.units.first : null;
+      }
+    } else if (product.units.isNotEmpty) {
+      selectedUnit = product.units.first;
+    }
+
+    // Lấy giá bán: ưu tiên theo chi nhánh, đơn vị, nhóm khách. Fallback khi giá = 0 để tránh tổng tiền thanh toán bị 0.
+    final branchId = branchProvider?.currentBranchId ?? authProvider.effectiveBranchId ?? '';
+    double unitPrice;
+    if (customer != null) {
+      unitPrice = product.getPriceForGroups(customer.groups);
+    } else {
+      unitPrice = product.getPriceByUnit(unitId: unitId, branchId: branchId.isEmpty ? null : branchId);
+    }
+    if (selectedUnit != null && selectedUnit.price > 0) {
+      unitPrice = selectedUnit.price;
+    }
+    if (unitPrice <= 0) {
+      // Fallback: đơn vị/branch có thể chưa set giá → dùng giá mặc định theo chi nhánh hoặc product
+      final fallback = product.getPriceByUnit(branchId: branchId.isEmpty ? null : branchId);
+      unitPrice = fallback > 0 ? fallback : product.price;
+    }
+
+    // Key giỏ: sản phẩm + đơn vị + lô (nếu có) để mỗi tổ hợp một dòng
     final cartKey = (batchName != null && batchName.isNotEmpty)
         ? '${product.id}_${batchName}_${expireDate?.toIso8601String() ?? ''}'
-        : product.id;
+        : (selectedUnit != null ? '${product.id}_${selectedUnit.id}' : product.id);
 
-    double maxQty = product.stock;
+    final conversionValue = selectedUnit?.conversionValue ?? 1.0;
+    // Tồn kho theo đơn vị cơ bản; nếu bán theo đơn vị khác thì max số lượng = stock / conversionValue
+    double maxQty = product.stock / conversionValue;
     if (batchName != null && product.batchExpires.isNotEmpty) {
       final branchId = branchProvider?.currentBranchId ?? '';
       for (final b in product.batchExpires) {
         if (b.batchName == batchName && b.branchId == branchId) {
-          maxQty = b.onHand;
+          maxQty = b.onHand / conversionValue;
           break;
         }
       }
@@ -346,6 +378,9 @@ class SalesProvider with ChangeNotifier {
         price: unitPrice,
         batchName: batchName,
         expireDate: expireDate,
+        unitId: selectedUnit?.id,
+        unitName: selectedUnit?.unitName,
+        conversionValue: selectedUnit?.conversionValue,
       );
     }
 
@@ -899,7 +934,7 @@ class SalesProvider with ChangeNotifier {
             debugPrint('⚠️ Lỗi khi tạo hóa đơn điện tử: $e');
           }
           // Lưu lỗi để hiển thị cho user
-          _errorMessage = 'Thanh toán thành công nhưng không thể tạo hóa đơn điện tử: $e';
+          _errorMessage = 'Thanh toán thành công nhưng không thể tạo hóa đơn điện tử: ${e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '')}';
         }
       }
 
@@ -914,7 +949,7 @@ class SalesProvider with ChangeNotifier {
       return true;
     } catch (e) {
       _isLoading = false;
-      _errorMessage = 'Lỗi khi thanh toán: ${e.toString()}';
+      _errorMessage = 'Lỗi khi thanh toán: ${e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '')}';
       if (kDebugMode) {
         debugPrint('SalesProvider checkout error: $_errorMessage');
       }
@@ -1040,7 +1075,7 @@ class SalesProvider with ChangeNotifier {
       return orderId;
     } catch (e) {
       _isLoading = false;
-      _errorMessage = 'Lỗi khi tạo đơn hàng: ${e.toString()}';
+      _errorMessage = 'Lỗi khi tạo đơn hàng: ${e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '')}';
       if (kDebugMode) {
         debugPrint('SalesProvider checkoutWithTransferManual error: $_errorMessage');
       }
@@ -1145,7 +1180,7 @@ class SalesProvider with ChangeNotifier {
       return orderId;
     } catch (e) {
       _isLoading = false;
-      _errorMessage = 'Lỗi khi tạo đơn hàng: ${e.toString()}';
+      _errorMessage = 'Lỗi khi tạo đơn hàng: ${e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '')}';
       if (kDebugMode) {
         debugPrint('SalesProvider checkoutWithTransfer error: $_errorMessage');
       }
@@ -1293,7 +1328,7 @@ class SalesProvider with ChangeNotifier {
       return true;
     } catch (e) {
       _isLoading = false;
-      _errorMessage = 'Lỗi khi hoàn tất thanh toán: ${e.toString()}';
+      _errorMessage = 'Lỗi khi hoàn tất thanh toán: ${e.toString().replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '')}';
       if (kDebugMode) {
         debugPrint('SalesProvider completeTransferPayment error: $_errorMessage');
       }

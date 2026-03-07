@@ -47,6 +47,24 @@ class EinvoiceService {
     return provider.createInvoice(sale: sale, shop: shop, salesService: salesService);
   }
 
+  /// Tạo hóa đơn nháp (chỉ FPT): trạng thái Chờ phát hành, không cấp số, không cập nhật đơn hàng. Dùng để test.
+  Future<Map<String, String>> createDraftInvoice({
+    required SaleModel sale,
+    required ShopModel shop,
+  }) async {
+    if (shop.einvoiceConfig == null) {
+      throw Exception('Chưa cấu hình thông tin hóa đơn điện tử. Vui lòng cài đặt trong Settings.');
+    }
+    if (shop.einvoiceConfig!.provider != EinvoiceProvider.fpt) {
+      throw Exception('Hóa đơn nháp chỉ hỗ trợ FPT. Nhà cung cấp hiện tại: ${shop.einvoiceConfig!.provider.label}.');
+    }
+    if (shop.stax == null || shop.stax!.isEmpty || shop.serial == null || shop.serial!.isEmpty) {
+      throw Exception('Chưa cấu hình mã số thuế và ký hiệu hóa đơn trong Cài đặt Shop.');
+    }
+    final provider = _getProvider(shop) as FptInvoiceProvider;
+    return provider.createDraftInvoice(sale: sale, shop: shop);
+  }
+
   /// Lấy link PDF / tra cứu hóa đơn (delegate tới đúng Provider).
   Future<String> getInvoicePdfUrl(String saleId, ShopModel shop) async {
     if (shop.einvoiceConfig == null) {

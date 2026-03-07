@@ -13,6 +13,7 @@ import '../../controllers/branch_provider.dart';
 import '../../controllers/tutorial_provider.dart';
 import '../../models/product_model.dart';
 import '../../models/sale_model.dart';
+import '../../models/unit_conversion.dart';
 import '../../models/branch_model.dart';
 import '../../models/shop_model.dart';
 import '../../models/customer_model.dart';
@@ -651,7 +652,21 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
 
-    salesProvider.addToCart(product, quantity: quantity, tabId: _activeTabId, customer: customer);
+    // Nếu có nhiều đơn vị, cho chọn đơn vị + số lượng trước khi thêm
+    if (product.units.length > 1) {
+      final unitResult = await _showUnitPickerDialog(product, quantity);
+      if (unitResult == null || !mounted) return;
+      final (unitId, qty) = unitResult;
+      salesProvider.addToCart(
+        product,
+        quantity: qty,
+        tabId: _activeTabId,
+        customer: customer,
+        unitId: unitId,
+      );
+    } else {
+      salesProvider.addToCart(product, quantity: quantity, tabId: _activeTabId, customer: customer);
+    }
     _productSearchController.clear();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -662,6 +677,82 @@ class _SalesScreenState extends State<SalesScreen> {
         ),
       );
     }
+  }
+
+  /// Dialog chọn đơn vị bán + số lượng (khi sản phẩm có nhiều đơn vị). Trả về (unitId, quantity) hoặc null.
+  Future<(String, double)?> _showUnitPickerDialog(ProductModel product, double initialQty) async {
+    if (product.units.isEmpty) return null;
+    final baseUnitList = product.units.where((x) => x.conversionValue == 1.0);
+    final baseUnit = baseUnitList.isEmpty ? 'cái' : baseUnitList.first.unitName;
+    UnitConversion? selectedUnit = product.units.first;
+    final qtyController = TextEditingController(text: initialQty.toStringAsFixed(0));
+
+    final result = await showDialog<(String, double)?>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Chọn đơn vị bán'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      product.name,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Đơn vị', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    ...product.units.map((u) {
+                      final convText = u.conversionValue == 1.0
+                          ? 'Đơn vị cơ bản'
+                          : '1 ${u.unitName} = ${u.conversionValue.toStringAsFixed(0)} $baseUnit';
+                      return RadioListTile<UnitConversion>(
+                        value: u,
+                        groupValue: selectedUnit,
+                        onChanged: (v) => setState(() => selectedUnit = v),
+                        title: Text(u.unitName, style: const TextStyle(fontWeight: FontWeight.w500)),
+                        subtitle: Text('$convText · ${NumberFormat('#,###').format(u.price.toInt())} đ'),
+                      );
+                    }),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: qtyController,
+                      decoration: const InputDecoration(
+                        labelText: 'Số lượng',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, null),
+                  child: const Text('Hủy'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final qty = double.tryParse(qtyController.text) ?? 1.0;
+                    if (qty <= 0 || selectedUnit == null) return;
+                    Navigator.pop(ctx, (selectedUnit!.id, qty));
+                  },
+                  child: const Text('Thêm vào giỏ'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    return result;
   }
 
   /// Dialog chọn lô hàng (KiotViet 2.4.1, 2.12.1 — Batch & Expire). Trả về (batchName, expireDate, quantity) hoặc null.
@@ -2257,7 +2348,9 @@ class _SalesScreenState extends State<SalesScreen> {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     child: Text(
-                      item.quantity.toStringAsFixed(0),
+                      item.unitName != null && item.unitName!.isNotEmpty
+                          ? '${item.quantity.toStringAsFixed(0)} ${item.unitName}'
+                          : item.quantity.toStringAsFixed(0),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -2381,7 +2474,9 @@ class _SalesScreenState extends State<SalesScreen> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        AppLocalizations.of(context)!.defaultUnit, // ignore: todo - TODO: Get from product
+                        item.unitName != null && item.unitName!.isNotEmpty
+                            ? item.unitName!
+                            : AppLocalizations.of(context)!.defaultUnit,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
@@ -3038,15 +3133,19 @@ class _SalesScreenState extends State<SalesScreen> {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.shop?.allowNegativeStock == true) return true;
     final stock = _getStockForProduct(item.productId);
-    return item.quantity < stock;
+    final conversion = item.conversionValue ?? 1.0;
+    final maxInUnit = stock / conversion;
+    return item.quantity < maxInUnit;
   }
 
   /// Tính số lượng hiệu lực: nếu không cho phép bán âm kho thì cap theo tồn kho.
-  double _effectiveQuantityForCart(double inputQty, String productId) {
+  double _effectiveQuantityForCart(double inputQty, String productId, {double? conversionValue}) {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.shop?.allowNegativeStock == true) return inputQty;
     final stock = _getStockForProduct(productId);
-    if (inputQty > stock) return stock;
+    final conversion = conversionValue ?? 1.0;
+    final maxInUnit = stock / conversion;
+    if (inputQty > maxInUnit) return maxInUnit;
     return inputQty;
   }
 
@@ -3081,7 +3180,7 @@ class _SalesScreenState extends State<SalesScreen> {
                   Navigator.of(dialogContext).pop();
                   return;
                 }
-                final effective = _effectiveQuantityForCart(qty, item.productId);
+                final effective = _effectiveQuantityForCart(qty, item.productId, conversionValue: item.conversionValue);
                 salesProvider.updateCartItemQuantity(cartKey, effective, tabId: _activeTabId);
                 Navigator.of(dialogContext).pop();
               },
@@ -3164,7 +3263,7 @@ class _SalesScreenState extends State<SalesScreen> {
                       Navigator.of(dialogContext).pop();
                       return;
                     }
-                    final effective = _effectiveQuantityForCart(qty, item.productId);
+                    final effective = _effectiveQuantityForCart(qty, item.productId, conversionValue: item.conversionValue);
                     salesProvider.updateCartItemQuantity(cartKey, effective, tabId: _activeTabId);
                     Navigator.of(dialogContext).pop();
                   },

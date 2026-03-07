@@ -134,7 +134,7 @@ class EinvoiceConfig {
       provider: EinvoiceProvider.fromString(map['provider']?.toString() ?? 'fpt'),
       username: map['username'] ?? '',
       password: map['password'] ?? '',
-      baseUrl: map['baseUrl'] ?? 'https://api-uat.einvoice.fpt.com.vn/create-icr',
+      baseUrl: map['baseUrl'] ?? 'https://api.einvoice.fpt.com.vn/create-icr',
       templateCode: map['templateCode']?.toString(),
       appId: map['appId']?.toString(),
     );

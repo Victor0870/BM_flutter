@@ -54,6 +54,11 @@ class MisaInvoiceProvider extends BaseEinvoiceProvider {
         final err = d['ErrorCode']?.toString() ?? d['Errors']?.toString() ?? 'Lỗi không xác định';
         throw Exception('MISA Token: $err');
       }
+      if (response.statusCode == 401) {
+        throw Exception(
+          'Lỗi 401 - Xác thực MISA thất bại. Kiểm tra AppID, Username, Password và Mã số thuế (Cài đặt > Hóa đơn điện tử).'
+        );
+      }
       throw Exception('MISA Token: HTTP ${response.statusCode}');
     } catch (e) {
       if (kDebugMode) debugPrint('❌ MISA get token: $e');
@@ -95,6 +100,11 @@ class MisaInvoiceProvider extends BaseEinvoiceProvider {
     }
 
     if (response.statusCode != 200) {
+      if (response.statusCode == 401) {
+        throw Exception(
+          'Lỗi 401 - Xác thực thất bại. Kiểm tra lại Username, Password và Base URL (Cài đặt > Hóa đơn điện tử).'
+        );
+      }
       throw Exception('MISA Create Invoice: HTTP ${response.statusCode}');
     }
 

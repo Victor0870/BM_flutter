@@ -12,6 +12,7 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
     super.key,
     required this.snapshot,
     required this.searchController,
+    required this.filterCustomerNameController,
     required this.onSearchChanged,
     required this.onRefresh,
     required this.onShowColumnPicker,
@@ -23,6 +24,9 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
     required this.onFilterDateChanged,
     required this.onFilterSellerChanged,
     required this.onFilterStatusChanged,
+    required this.onFilterCustomerNameChanged,
+    required this.onFilterEinvoiceStatusChanged,
+    required this.onFilterPaymentMethodChanged,
     required this.onReset,
     required this.onLoadMore,
     required this.onEditSale,
@@ -30,6 +34,7 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
 
   final SalesHistorySnapshot snapshot;
   final TextEditingController searchController;
+  final TextEditingController filterCustomerNameController;
   final ValueChanged<String> onSearchChanged;
   final Future<void> Function() onRefresh;
   final VoidCallback onShowColumnPicker;
@@ -41,6 +46,9 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
   final void Function(DateTime?, DateTime?) onFilterDateChanged;
   final ValueChanged<String?> onFilterSellerChanged;
   final ValueChanged<String?> onFilterStatusChanged;
+  final ValueChanged<String?> onFilterCustomerNameChanged;
+  final ValueChanged<String?> onFilterEinvoiceStatusChanged;
+  final ValueChanged<String?> onFilterPaymentMethodChanged;
   final VoidCallback onReset;
   final VoidCallback? onLoadMore;
   final void Function(SaleModel sale) onEditSale;
@@ -48,6 +56,7 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
   static const List<SalesHistoryInvoiceColumnDef> columnDefs = [
     SalesHistoryInvoiceColumnDef('invoiceCode', 'Mã hóa đơn', false),
     SalesHistoryInvoiceColumnDef('time', 'Thời gian', false),
+    SalesHistoryInvoiceColumnDef('paymentMethod', 'Hình thức thanh toán', false),
     SalesHistoryInvoiceColumnDef('returnCode', 'Mã trả hàng', false),
     SalesHistoryInvoiceColumnDef('customerCode', 'Mã KH', false),
     SalesHistoryInvoiceColumnDef('customer', 'Khách hàng', false),
@@ -78,6 +87,7 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
       children: [
         _InvoiceFilterSidebar(
           searchController: searchController,
+          filterCustomerNameController: filterCustomerNameController,
           onSearchChanged: onSearchChanged,
           filterBranchId: snapshot.filterBranchId,
           onBranchChanged: onFilterBranchChanged,
@@ -88,6 +98,12 @@ class SalesHistoryScreenDesktop extends StatelessWidget {
           onSellerChanged: onFilterSellerChanged,
           filterStatusValue: snapshot.filterStatusValue,
           onStatusChanged: onFilterStatusChanged,
+          filterCustomerName: snapshot.filterCustomerName,
+          onFilterCustomerNameChanged: onFilterCustomerNameChanged,
+          filterEinvoiceStatus: snapshot.filterEinvoiceStatus,
+          onFilterEinvoiceStatusChanged: onFilterEinvoiceStatusChanged,
+          filterPaymentMethod: snapshot.filterPaymentMethod,
+          onFilterPaymentMethodChanged: onFilterPaymentMethodChanged,
           branches: snapshot.branches,
           sellers: snapshot.sellers,
           onReset: onReset,
@@ -256,6 +272,7 @@ class _SalesHistoryColumnPickerDialogState extends State<SalesHistoryColumnPicke
 
 class _InvoiceFilterSidebar extends StatelessWidget {
   final TextEditingController searchController;
+  final TextEditingController filterCustomerNameController;
   final ValueChanged<String> onSearchChanged;
   final String? filterBranchId;
   final ValueChanged<String?> onBranchChanged;
@@ -266,12 +283,19 @@ class _InvoiceFilterSidebar extends StatelessWidget {
   final ValueChanged<String?> onSellerChanged;
   final String? filterStatusValue;
   final ValueChanged<String?> onStatusChanged;
+  final String? filterCustomerName;
+  final ValueChanged<String?> onFilterCustomerNameChanged;
+  final String? filterEinvoiceStatus;
+  final ValueChanged<String?> onFilterEinvoiceStatusChanged;
+  final String? filterPaymentMethod;
+  final ValueChanged<String?> onFilterPaymentMethodChanged;
   final List<BranchModel> branches;
   final List<({String id, String name})> sellers;
   final VoidCallback? onReset;
 
   const _InvoiceFilterSidebar({
     required this.searchController,
+    required this.filterCustomerNameController,
     required this.onSearchChanged,
     required this.filterBranchId,
     required this.onBranchChanged,
@@ -282,6 +306,12 @@ class _InvoiceFilterSidebar extends StatelessWidget {
     required this.onSellerChanged,
     required this.filterStatusValue,
     required this.onStatusChanged,
+    this.filterCustomerName,
+    required this.onFilterCustomerNameChanged,
+    this.filterEinvoiceStatus,
+    required this.onFilterEinvoiceStatusChanged,
+    this.filterPaymentMethod,
+    required this.onFilterPaymentMethodChanged,
     required this.branches,
     required this.sellers,
     this.onReset,
@@ -466,6 +496,48 @@ class _InvoiceFilterSidebar extends StatelessWidget {
                     DropdownMenuItem(value: kOrderStatusCancelled, child: Text('Đã hủy')),
                   ],
                   onChanged: onStatusChanged,
+                )),
+                _section(context, 'Tên khách hàng', child: ListenableBuilder(
+                  listenable: filterCustomerNameController,
+                  builder: (context, _) {
+                    return TextField(
+                      controller: filterCustomerNameController,
+                      onChanged: (v) => onFilterCustomerNameChanged(v.isEmpty ? null : v),
+                      decoration: _inputDeco('Theo tên khách hàng').copyWith(
+                        hintText: 'Nhập tên khách hàng',
+                        prefixIcon: const Icon(Icons.person_outline, size: 20),
+                        suffixIcon: filterCustomerNameController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  filterCustomerNameController.clear();
+                                  onFilterCustomerNameChanged(null);
+                                },
+                              )
+                            : null,
+                      ),
+                    );
+                  },
+                )),
+                _section(context, 'Tình trạng HĐĐT', child: DropdownButtonFormField<String?>(
+                  initialValue: filterEinvoiceStatus,
+                  decoration: _inputDeco('Chọn tình trạng'),
+                  items: const [
+                    DropdownMenuItem(value: null, child: Text('Tất cả')),
+                    DropdownMenuItem(value: 'issued', child: Text('Đã xuất HĐĐT')),
+                    DropdownMenuItem(value: 'not_issued', child: Text('Chưa xuất HĐĐT')),
+                  ],
+                  onChanged: onFilterEinvoiceStatusChanged,
+                )),
+                _section(context, 'Hình thức thanh toán', child: DropdownButtonFormField<String?>(
+                  initialValue: filterPaymentMethod,
+                  decoration: _inputDeco('Chọn hình thức'),
+                  items: const [
+                    DropdownMenuItem(value: null, child: Text('Tất cả')),
+                    DropdownMenuItem(value: 'CASH', child: Text('Tiền mặt')),
+                    DropdownMenuItem(value: 'TRANSFER', child: Text('Chuyển khoản')),
+                  ],
+                  onChanged: onFilterPaymentMethodChanged,
                 )),
                 _section(context, 'Người bán', child: DropdownButtonFormField<String?>(
                   initialValue: filterSellerId,
@@ -775,6 +847,8 @@ class _SalesTableDesktop extends StatelessWidget {
         return 'HD${getOrderId(sale.id).replaceAll('ORD-', '')}';
       case 'time':
         return DateFormat('dd/MM/yyyy HH:mm').format(sale.timestamp);
+      case 'paymentMethod':
+        return sale.paymentMethod.toUpperCase() == 'TRANSFER' ? 'Chuyển khoản' : 'Tiền mặt';
       case 'returnCode':
         return '—';
       case 'customerCode':

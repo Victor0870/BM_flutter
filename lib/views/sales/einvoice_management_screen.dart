@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/sale_model.dart';
 import '../../models/shop_model.dart';
+import '../../models/branch_model.dart';
 import '../../controllers/auth_provider.dart';
 import '../../controllers/branch_provider.dart';
 import '../../services/sales_service.dart';
@@ -55,6 +56,12 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
   bool _isBulkIssuing = false;
   bool _isRefreshingStatus = false;
 
+  // Bộ lọc nâng cao (desktop)
+  final _einvoiceSearchController = TextEditingController();
+  final _filterCustomerNameController = TextEditingController();
+  String? _filterEinvoiceStatus;
+  String? _filterPaymentMethod;
+
   // Cấu hình kết nối HĐĐT
   EinvoiceProvider _selectedProvider = EinvoiceProvider.fpt;
   final _usernameController = TextEditingController();
@@ -81,7 +88,33 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
     _baseUrlController.dispose();
     _appIdController.dispose();
     _templateCodeController.dispose();
+    _einvoiceSearchController.dispose();
+    _filterCustomerNameController.dispose();
     super.dispose();
+  }
+
+  List<SaleModel> _getFilteredSalesForDesktop() {
+    return _sales.where((sale) {
+      if (_einvoiceSearchController.text.trim().isNotEmpty) {
+        final q = _einvoiceSearchController.text.trim().toLowerCase();
+        final code = (sale.id.length >= 8 ? sale.id.substring(0, 8) : sale.id).toLowerCase();
+        if (!code.contains(q)) return false;
+      }
+      if (_filterCustomerNameController.text.trim().isNotEmpty) {
+        final name = (sale.customerName ?? 'Khách lẻ').toLowerCase();
+        if (!name.contains(_filterCustomerNameController.text.trim().toLowerCase())) return false;
+      }
+      if (_filterEinvoiceStatus != null) {
+        final issued = _isInvoiceIssued(sale);
+        if (_filterEinvoiceStatus == 'issued' && !issued) return false;
+        if (_filterEinvoiceStatus == 'not_issued' && issued) return false;
+      }
+      if (_filterPaymentMethod != null) {
+        final pm = sale.paymentMethod.toUpperCase();
+        if (pm != _filterPaymentMethod) return false;
+      }
+      return true;
+    }).toList();
   }
 
   void _loadEinvoiceConfig() {
@@ -106,7 +139,7 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
       case EinvoiceProvider.misa:
         return 'https://testapi.meinvoice.vn';
       case EinvoiceProvider.fpt:
-        return 'https://api-uat.einvoice.fpt.com.vn/create-icr';
+        return 'https://api.einvoice.fpt.com.vn/create-icr';
     }
   }
 
@@ -940,30 +973,74 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
     return _buildDesktopLayout(context);
   }
 
-  /// Giao diện Desktop: bảng rộng, header ngang, DataTable.
+  /// Giao diện Desktop: sidebar bộ lọc + nội dung chính (giống Hóa đơn bán hàng).
   Widget _buildDesktopLayout(BuildContext context) {
+    final filteredSales = _getFilteredSalesForDesktop();
     return Scaffold(
-      body: Column(
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ResponsiveContainer(
-            maxWidth: 1200,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          Consumer<BranchProvider>(
+            builder: (context, branchProvider, _) {
+              final branches = branchProvider.branches.where((b) => b.isActive).toList();
+              return _EinvoiceFilterSidebar(
+                searchController: _einvoiceSearchController,
+                filterCustomerNameController: _filterCustomerNameController,
+                filterBranchId: _selectedBranchId,
+                onBranchChanged: (v) {
+                  setState(() => _selectedBranchId = v);
+                  _loadSales();
+                },
+                filterDateFrom: _startDate,
+                filterDateTo: _endDate,
+                onDateChanged: (from, to) {
+                  if (from != null && to != null) {
+                    setState(() {
+                      _startDate = from;
+                      _endDate = to;
+                    });
+                    _loadSales();
+                  }
+                },
+                filterEinvoiceStatus: _filterEinvoiceStatus,
+                onFilterEinvoiceStatusChanged: (v) => setState(() => _filterEinvoiceStatus = v),
+                filterPaymentMethod: _filterPaymentMethod,
+                onFilterPaymentMethodChanged: (v) => setState(() => _filterPaymentMethod = v),
+                branches: branches,
+                onReset: () {
+                  setState(() {
+                    _einvoiceSearchController.clear();
+                    _filterCustomerNameController.clear();
+                    _filterEinvoiceStatus = null;
+                    _filterPaymentMethod = null;
+                  });
+                },
+                onFilterChanged: () => setState(() {}),
+              );
+            },
+          ),
+          Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Quản lý hóa đơn điện tử',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                    Row(
-                      children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Quản lý hóa đơn điện tử',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          Row(
+                            children: [
                         if (_selectedSaleIds.isNotEmpty) ...[
                           OutlinedButton.icon(
                             onPressed: _isBulkIssuing ? null : _bulkIssueInvoices,
@@ -1016,101 +1093,53 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _buildConnectionConfigCard(context),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DateRangeFilter(
-                        startDate: _startDate,
-                        endDate: _endDate,
-                        onStartDateChanged: (d) {
-                          setState(() => _startDate = d);
-                          _loadSales();
-                        },
-                        onEndDateChanged: (d) {
-                          setState(() => _endDate = d);
-                          _loadSales();
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Consumer<BranchProvider>(
-                      builder: (context, branchProvider, _) {
-                        final branches = branchProvider.branches.where((b) => b.isActive).toList();
-                        return SizedBox(
-                          width: 200,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFFE2E8F0)),
-                            ),
-                            child: DropdownButton<String?>(
-                              value: _selectedBranchId,
-                              isExpanded: true,
-                              underline: const SizedBox(),
-                              items: [
-                                const DropdownMenuItem(value: null, child: Text('Tất cả chi nhánh')),
-                                ...branches.map(
-                                    (b) => DropdownMenuItem(value: b.id, child: Text(b.name)),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                setState(() => _selectedBranchId = v);
-                                _loadSales();
-                              },
+                      _buildConnectionConfigCard(context),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _StatCard(
+                              icon: Icons.receipt,
+                              iconColor: Colors.blue,
+                              iconBg: Colors.blue.shade50,
+                              label: 'Tổng số hóa đơn',
+                              value: filteredSales.length.toString(),
+                              suffix: 'đơn',
                             ),
                           ),
-                        );
-                      },
-                    ),
-                  ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _StatCard(
+                              icon: Icons.check_circle,
+                              iconColor: Colors.green,
+                              iconBg: Colors.green.shade50,
+                              label: 'Đã xuất HĐĐT',
+                              value: filteredSales.where((s) => _isInvoiceIssued(s)).length.toString(),
+                              suffix: 'đơn',
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _StatCard(
+                              icon: Icons.pending,
+                              iconColor: Colors.orange,
+                              iconBg: Colors.orange.shade50,
+                              label: 'Chưa xuất HĐĐT',
+                              value: filteredSales.where((s) => !_isInvoiceIssued(s)).length.toString(),
+                              suffix: 'đơn',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        icon: Icons.receipt,
-                        iconColor: Colors.blue,
-                        iconBg: Colors.blue.shade50,
-                        label: 'Tổng số hóa đơn',
-                        value: _sales.length.toString(),
-                        suffix: 'đơn',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StatCard(
-                        icon: Icons.check_circle,
-                        iconColor: Colors.green,
-                        iconBg: Colors.green.shade50,
-                        label: 'Đã xuất HĐĐT',
-                        value: _sales.where((s) => _isInvoiceIssued(s)).length.toString(),
-                        suffix: 'đơn',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StatCard(
-                        icon: Icons.pending,
-                        iconColor: Colors.orange,
-                        iconBg: Colors.orange.shade50,
-                        label: 'Chưa xuất HĐĐT',
-                        value: _sales.where((s) => !_isInvoiceIssued(s)).length.toString(),
-                        suffix: 'đơn',
-                      ),
-                    ),
-                  ],
+                const Divider(height: 1),
+                Expanded(
+                  child: _buildDesktopContent(context),
                 ),
               ],
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: _buildDesktopContent(context),
           ),
         ],
       ),
@@ -1133,7 +1162,8 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
         ),
       );
     }
-    if (_sales.isEmpty) {
+    final filteredSales = _getFilteredSalesForDesktop();
+    if (filteredSales.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1141,20 +1171,28 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
             Icon(Icons.receipt_long, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             Text(
-              'Không có hóa đơn trong kỳ báo cáo',
+              _sales.isEmpty ? 'Không có hóa đơn trong kỳ báo cáo' : 'Không có kết quả phù hợp bộ lọc',
               style: TextStyle(color: Colors.grey.shade600),
             ),
           ],
         ),
       );
     }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SingleChildScrollView(
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
-          columnSpacing: 16,
-          columns: const [
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
+                  columnSpacing: 16,
+                  columns: const [
             DataColumn(label: Text('Mã đơn', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
             DataColumn(label: Text('Ngày bán', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
             DataColumn(label: Text('Khách hàng', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
@@ -1163,7 +1201,7 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
             DataColumn(label: Text('Số HĐĐT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)))),
             DataColumn(label: SizedBox(width: 100)),
           ],
-          rows: _sales.map((sale) {
+          rows: filteredSales.map((sale) {
             final isIssued = _isInvoiceIssued(sale);
             return DataRow(
               cells: [
@@ -1172,7 +1210,7 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
                     sale.id.length >= 8 ? sale.id.substring(0, 8).toUpperCase() : sale.id,
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF3B82F6)),
                   ),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))).then((_) { if (mounted) _loadSales(); }),
                 ),
                 DataCell(Text(DateFormat('dd/MM/yyyy HH:mm').format(sale.timestamp), style: const TextStyle(fontSize: 13))),
                 DataCell(Text(sale.customerName ?? 'Khách lẻ', style: const TextStyle(fontSize: 13))),
@@ -1206,7 +1244,7 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
                             IconButton(
                               icon: const Icon(Icons.open_in_new, size: 18),
                               color: Colors.blue,
-                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))),
+                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))).then((_) { if (mounted) _loadSales(); }),
                               tooltip: 'Xem chi tiết',
                             ),
                           ],
@@ -1216,7 +1254,11 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
               ],
             );
           }).toList(),
-        ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1380,7 +1422,7 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
           child: InkWell(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))).then((_) { if (mounted) _loadSales(); }),
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -1446,7 +1488,7 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
                         TextButton.icon(
                           icon: const Icon(Icons.open_in_new, size: 18),
                           label: const Text('Chi tiết'),
-                          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))),
+                          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SaleDetailScreen(sale: sale))).then((_) { if (mounted) _loadSales(); }),
                         ),
                       ],
                     ),
@@ -1457,6 +1499,258 @@ class _EinvoiceManagementScreenState extends State<EinvoiceManagementScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Sidebar bộ lọc nâng cao (desktop) — thiết kế giống Hóa đơn bán hàng.
+class _EinvoiceFilterSidebar extends StatelessWidget {
+  final TextEditingController searchController;
+  final TextEditingController filterCustomerNameController;
+  final String? filterBranchId;
+  final ValueChanged<String?> onBranchChanged;
+  final DateTime? filterDateFrom;
+  final DateTime? filterDateTo;
+  final void Function(DateTime?, DateTime?) onDateChanged;
+  final String? filterEinvoiceStatus;
+  final ValueChanged<String?> onFilterEinvoiceStatusChanged;
+  final String? filterPaymentMethod;
+  final ValueChanged<String?> onFilterPaymentMethodChanged;
+  final List<BranchModel> branches;
+  final VoidCallback onReset;
+  final VoidCallback? onFilterChanged;
+
+  const _EinvoiceFilterSidebar({
+    required this.searchController,
+    required this.filterCustomerNameController,
+    this.filterBranchId,
+    required this.onBranchChanged,
+    this.filterDateFrom,
+    this.filterDateTo,
+    required this.onDateChanged,
+    this.filterEinvoiceStatus,
+    required this.onFilterEinvoiceStatusChanged,
+    this.filterPaymentMethod,
+    required this.onFilterPaymentMethodChanged,
+    required this.branches,
+    required this.onReset,
+    this.onFilterChanged,
+  });
+
+  static const Color _primary = Color(0xFF2563EB);
+  static const Color _text = Color(0xFF1E293B);
+  static const Color _border = Color(0xFFE2E8F0);
+
+  static InputDecoration _inputDeco(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(fontSize: 13, color: Colors.grey[500], fontStyle: FontStyle.italic),
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+      filled: true,
+      fillColor: Colors.white,
+    );
+  }
+
+  Widget _section(BuildContext context, String title, {required Widget child}) {
+    return Theme(
+      data: Theme.of(context).copyWith(
+        dividerColor: Colors.transparent,
+        splashColor: _primary.withValues(alpha: 0.08),
+        highlightColor: _primary.withValues(alpha: 0.04),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+        collapsedShape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+        title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _text)),
+        iconColor: _primary,
+        collapsedIconColor: _text,
+        initiallyExpanded: true,
+        children: [child],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 300,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.only(topRight: Radius.circular(16), bottomRight: Radius.circular(16)),
+          border: Border(right: BorderSide(color: _border)),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(-2, 0))],
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 16, 12),
+              child: Row(
+                children: [
+                  Icon(Icons.filter_list, color: _primary, size: 22),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Bộ lọc nâng cao',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: _text),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.refresh, size: 20, color: _text),
+                    onPressed: onReset,
+                    tooltip: 'Đặt lại bộ lọc',
+                    style: IconButton.styleFrom(foregroundColor: _text),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: _border),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  _section(context, 'Mã đơn', child: ListenableBuilder(
+                    listenable: searchController,
+                    builder: (context, _) {
+                      return TextField(
+                        controller: searchController,
+                        decoration: InputDecoration(
+                          hintText: 'Theo mã đơn',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon: searchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () => searchController.clear(),
+                                )
+                              : null,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => onFilterChanged?.call(),
+                      );
+                    },
+                  )),
+                  _section(context, 'Chi nhánh', child: DropdownButtonFormField<String?>(
+                    initialValue: filterBranchId,
+                    decoration: _inputDeco('Chọn chi nhánh'),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('Tất cả chi nhánh')),
+                      ...branches.map((b) => DropdownMenuItem(value: b.id, child: Text(b.name))),
+                    ],
+                    onChanged: onBranchChanged,
+                  )),
+                  _section(context, 'Thời gian', child: _buildDateRow(context)),
+                  _section(context, 'Tên khách hàng', child: ListenableBuilder(
+                    listenable: filterCustomerNameController,
+                    builder: (context, _) {
+                      return TextField(
+                        controller: filterCustomerNameController,
+                        onChanged: (_) => onFilterChanged?.call(),
+                        decoration: _inputDeco('Nhập tên khách hàng').copyWith(
+                          prefixIcon: const Icon(Icons.person_outline, size: 20),
+                          suffixIcon: filterCustomerNameController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () {
+                                    filterCustomerNameController.clear();
+                                    onFilterChanged?.call();
+                                  },
+                                )
+                              : null,
+                        ),
+                      );
+                    },
+                  )),
+                  _section(context, 'Tình trạng HĐĐT', child: DropdownButtonFormField<String?>(
+                    initialValue: filterEinvoiceStatus,
+                    decoration: _inputDeco('Chọn tình trạng'),
+                    items: const [
+                      DropdownMenuItem(value: null, child: Text('Tất cả')),
+                      DropdownMenuItem(value: 'issued', child: Text('Đã xuất HĐĐT')),
+                      DropdownMenuItem(value: 'not_issued', child: Text('Chưa xuất HĐĐT')),
+                    ],
+                    onChanged: onFilterEinvoiceStatusChanged,
+                  )),
+                  _section(context, 'Hình thức thanh toán', child: DropdownButtonFormField<String?>(
+                    initialValue: filterPaymentMethod,
+                    decoration: _inputDeco('Chọn hình thức'),
+                    items: const [
+                      DropdownMenuItem(value: null, child: Text('Tất cả')),
+                      DropdownMenuItem(value: 'CASH', child: Text('Tiền mặt')),
+                      DropdownMenuItem(value: 'TRANSFER', child: Text('Chuyển khoản')),
+                    ],
+                    onChanged: onFilterPaymentMethodChanged,
+                  )),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateRow(BuildContext ctx) {
+    final isCustom = filterDateFrom != null && filterDateTo != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => onDateChanged(null, null),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Icon(isCustom ? Icons.radio_button_off : Icons.radio_button_checked,
+                    size: 20, color: !isCustom ? _primary : _border),
+                const SizedBox(width: 10),
+                Text('Tất cả thời gian', style: const TextStyle(fontSize: 13, color: _text, fontWeight: FontWeight.w500)),
+              ],
+            ),
+          ),
+        ),
+        InkWell(
+          onTap: () async {
+            final now = DateTime.now();
+            final picked = await showDateRangePicker(
+              context: ctx,
+              firstDate: DateTime(now.year - 2),
+              lastDate: now,
+              initialDateRange: filterDateFrom != null && filterDateTo != null
+                  ? DateTimeRange(start: filterDateFrom!, end: filterDateTo!)
+                  : DateTimeRange(start: now.copyWith(day: 1), end: now),
+              helpText: 'Chọn khoảng thời gian',
+            );
+            if (picked != null) {
+              onDateChanged(
+                DateTime(picked.start.year, picked.start.month, picked.start.day),
+                DateTime(picked.end.year, picked.end.month, picked.end.day),
+              );
+            }
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Icon(isCustom ? Icons.radio_button_checked : Icons.radio_button_off,
+                    size: 20, color: isCustom ? _primary : _border),
+                const SizedBox(width: 10),
+                Text('Tùy chọn ngày', style: const TextStyle(fontSize: 13, color: _text, fontWeight: FontWeight.w500)),
+                const SizedBox(width: 8),
+                Icon(Icons.calendar_today, size: 18, color: Colors.grey[600]),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

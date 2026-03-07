@@ -50,6 +50,9 @@ class SalesHistorySnapshot {
     this.filterBranchId,
     this.filterSellerId,
     this.filterStatusValue,
+    this.filterCustomerName,
+    this.filterEinvoiceStatus,
+    this.filterPaymentMethod,
     required this.stats,
     required this.hasMore,
     required this.isLoadingMore,
@@ -73,6 +76,9 @@ class SalesHistorySnapshot {
   final String? filterBranchId;
   final String? filterSellerId;
   final String? filterStatusValue;
+  final String? filterCustomerName;
+  final String? filterEinvoiceStatus;
+  final String? filterPaymentMethod;
   final Map<String, int> stats;
   final bool hasMore;
   final bool isLoadingMore;

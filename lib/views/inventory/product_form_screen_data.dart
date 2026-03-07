@@ -26,6 +26,7 @@ class ProductFormParams {
     required this.enableCostPrice,
     required this.variants,
     required this.units,
+    required this.attributes,
     required this.isInventoryManaged,
     required this.isImeiManaged,
     required this.isBatchManaged,
@@ -38,12 +39,14 @@ class ProductFormParams {
     required this.onCategoryChanged,
     required this.showAddVariantDialog,
     required this.showAddUnitDialog,
+    required this.showAddAttributeDialog,
     required this.showQuickAddCategoryDialog,
     required this.onToggleInventoryManaged,
     required this.onToggleImeiManaged,
     required this.onToggleBatchManaged,
     required this.onRemoveVariant,
     required this.onRemoveUnit,
+    required this.onRemoveAttribute,
     required this.requestRebuild,
     this.onShowStockCard,
   });
@@ -69,6 +72,7 @@ class ProductFormParams {
 
   final List<ProductVariant> variants;
   final List<UnitConversion> units;
+  final List<ProductAttribute> attributes;
 
   final bool isInventoryManaged;
   final bool isImeiManaged;
@@ -83,12 +87,14 @@ class ProductFormParams {
   final ValueChanged<String?> onCategoryChanged;
   final void Function({int? index}) showAddVariantDialog;
   final void Function({int? index}) showAddUnitDialog;
+  final void Function({int? index}) showAddAttributeDialog;
   final VoidCallback showQuickAddCategoryDialog;
   final ValueChanged<bool> onToggleInventoryManaged;
   final ValueChanged<bool> onToggleImeiManaged;
   final ValueChanged<bool> onToggleBatchManaged;
   final void Function(int index) onRemoveVariant;
   final void Function(int index) onRemoveUnit;
+  final void Function(int index) onRemoveAttribute;
   /// Gọi sau khi đóng bottom sheet / thay đổi cần rebuild (mobile).
   final VoidCallback requestRebuild;
   /// Mở thẻ kho (tồn kho theo chi nhánh). Chỉ có khi đang sửa sản phẩm (mobile).

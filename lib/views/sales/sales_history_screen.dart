@@ -47,6 +47,7 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
   bool _isLoading = true;
   String? _errorMessage;
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _filterCustomerNameController = TextEditingController();
   Timer? _searchDebounce;
   String _searchQuery = '';
   DocumentSnapshot? _lastDoc;
@@ -65,6 +66,9 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
   String? _filterBranchId;
   String? _filterSellerId;
   String? _filterStatusValue;
+  String _filterCustomerName = '';
+  String? _filterEinvoiceStatus;
+  String? _filterPaymentMethod;
 
   late Map<String, bool> _visibleColumns;
 
@@ -73,8 +77,8 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
     super.initState();
     _visibleColumns = {
       for (final def in SalesHistoryScreenDesktop.columnDefs)
-        def.id: def.id == 'invoiceCode' || def.id == 'time' || def.id == 'customer' ||
-            def.id == 'totalGoods' || def.id == 'discount' || def.id == 'customerPaid',
+        def.id: def.id == 'invoiceCode' || def.id == 'time' || def.id == 'paymentMethod' ||
+            def.id == 'customer' || def.id == 'totalGoods' || def.id == 'discount' || def.id == 'customerPaid',
     };
     _loadSales();
   }
@@ -103,6 +107,9 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
       filterBranchId: _filterBranchId,
       filterSellerId: _filterSellerId,
       filterStatusValue: _filterStatusValue,
+      filterCustomerName: _filterCustomerName.isEmpty ? null : _filterCustomerName,
+      filterEinvoiceStatus: _filterEinvoiceStatus,
+      filterPaymentMethod: _filterPaymentMethod,
       stats: _getOrderStats(),
       hasMore: _hasMore,
       isLoadingMore: _isLoadingMore,
@@ -186,6 +193,7 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
   @override
   void dispose() {
     _searchController.dispose();
+    _filterCustomerNameController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
   }
@@ -198,12 +206,28 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
   }
 
   List<SaleModel> _getFilteredSales() {
-    if (_searchQuery.trim().isEmpty) return _sales;
-    final query = _searchQuery.toLowerCase();
     return _sales.where((sale) {
-      final orderId = _getOrderId(sale.id).toLowerCase();
-      final customerName = (sale.customerName ?? 'Khách lẻ').toLowerCase();
-      return orderId.contains(query) || customerName.contains(query);
+      if (_searchQuery.trim().isNotEmpty) {
+        final query = _searchQuery.toLowerCase();
+        final orderId = _getOrderId(sale.id).toLowerCase();
+        final customerName = (sale.customerName ?? 'Khách lẻ').toLowerCase();
+        if (!orderId.contains(query) && !customerName.contains(query)) return false;
+      }
+      if (_filterCustomerName.trim().isNotEmpty) {
+        final name = (sale.customerName ?? 'Khách lẻ').toLowerCase();
+        if (!name.contains(_filterCustomerName.trim().toLowerCase())) return false;
+      }
+      if (_filterEinvoiceStatus != null) {
+        final issued = sale.invoiceNo != null && sale.invoiceNo!.isNotEmpty &&
+            sale.einvoiceUrl != null && sale.einvoiceUrl!.isNotEmpty;
+        if (_filterEinvoiceStatus == 'issued' && !issued) return false;
+        if (_filterEinvoiceStatus == 'not_issued' && issued) return false;
+      }
+      if (_filterPaymentMethod != null) {
+        final pm = sale.paymentMethod.toUpperCase();
+        if (pm != _filterPaymentMethod) return false;
+      }
+      return true;
     }).toList();
   }
 
@@ -398,6 +422,7 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
     return SalesHistoryScreenDesktop(
       snapshot: _buildSnapshot(),
       searchController: _searchController,
+      filterCustomerNameController: _filterCustomerNameController,
       onSearchChanged: _onSearchChanged,
       onRefresh: _loadSales,
       onShowColumnPicker: _showColumnPicker,
@@ -445,11 +470,18 @@ class _SalesHistoryContentState extends State<_SalesHistoryContent> {
         });
         _loadSales();
       },
+      onFilterCustomerNameChanged: (v) => setState(() => _filterCustomerName = v ?? ''),
+      onFilterEinvoiceStatusChanged: (v) => setState(() => _filterEinvoiceStatus = v),
+      onFilterPaymentMethodChanged: (v) => setState(() => _filterPaymentMethod = v),
       onReset: () {
         setState(() {
           _filterBranchId = null;
           _filterSellerId = null;
           _filterStatusValue = null;
+          _filterCustomerName = '';
+          _filterCustomerNameController.clear();
+          _filterEinvoiceStatus = null;
+          _filterPaymentMethod = null;
           _filterDateFrom = null;
           _filterDateTo = null;
           _timeRange = SalesHistoryTimeRangeKey.week;

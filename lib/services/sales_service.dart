@@ -294,10 +294,11 @@ class SalesService {
           debugPrint('📦 Current stock for ${product.name}: ${product.stock}');
         }
 
-        // Tính stock mới cho branch từ sale.branchId
+        // Tính stock mới cho branch từ sale.branchId. Trừ theo đơn vị cơ bản (quantity * conversionValue).
         final branchId = sale.branchId.isNotEmpty ? sale.branchId : 'default';
         final currentBranchStock = product.branchStock[branchId] ?? product.stock;
-        final newStock = currentBranchStock - item.quantity;
+        final qtyToDeduct = item.quantity * (item.conversionValue ?? 1.0);
+        final newStock = currentBranchStock - qtyToDeduct;
         
         if (newStock < 0) {
           if (kDebugMode) {

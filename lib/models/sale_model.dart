@@ -455,6 +455,12 @@ class SaleItem {
   final String? batchName;
   /// Hạn sử dụng lô hàng đã bán (invoiceDetails).
   final DateTime? expireDate;
+  /// ID đơn vị tính khi bán (nếu có nhiều đơn vị: cái, hộp, thùng...).
+  final String? unitId;
+  /// Tên đơn vị hiển thị (VD: "hộp", "thùng").
+  final String? unitName;
+  /// Hệ số quy đổi: số đơn vị cơ bản trên 1 đơn vị bán (VD: 1 hộp = 12 cái → 12). Dùng khi trừ kho.
+  final double? conversionValue;
 
   SaleItem({
     required this.productId,
@@ -467,6 +473,9 @@ class SaleItem {
     this.notes,
     this.batchName,
     this.expireDate,
+    this.unitId,
+    this.unitName,
+    this.conversionValue,
   });
 
   /// Tính subtotal sau khi áp dụng chiết khấu
@@ -528,6 +537,9 @@ class SaleItem {
       notes: map['notes'] as String?,
       batchName: map['batchName'] as String?,
       expireDate: exp,
+      unitId: map['unitId'] as String?,
+      unitName: map['unitName'] as String?,
+      conversionValue: map['conversionValue'] != null ? (map['conversionValue'] as num).toDouble() : null,
     );
   }
 
@@ -558,6 +570,9 @@ class SaleItem {
       'notes': notes,
       'batchName': batchName,
       'expireDate': expireDate?.toIso8601String(),
+      'unitId': unitId,
+      'unitName': unitName,
+      'conversionValue': conversionValue,
     };
   }
 
@@ -573,6 +588,9 @@ class SaleItem {
     String? notes,
     String? batchName,
     DateTime? expireDate,
+    String? unitId,
+    String? unitName,
+    double? conversionValue,
   }) {
     return SaleItem(
       productId: productId ?? this.productId,
@@ -585,6 +603,9 @@ class SaleItem {
       notes: notes ?? this.notes,
       batchName: batchName ?? this.batchName,
       expireDate: expireDate ?? this.expireDate,
+      unitId: unitId ?? this.unitId,
+      unitName: unitName ?? this.unitName,
+      conversionValue: conversionValue ?? this.conversionValue,
     );
   }
 }
